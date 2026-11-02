@@ -1,0 +1,7 @@
+{
+  "name": "sandbox-native-compose",
+  "dockerComposeFile": "compose.yaml",
+  "service": "app",
+  "workspaceFolder": "/workspace",
+  "postCreateCommand": "printf compose-ready > /tmp/devsy-sandbox-compose"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "sandbox-native-dockerfile",
+  "build": {"dockerfile": "Dockerfile"},
+  "features": {"ghcr.io/devcontainers/features/common-utils:2": {}},
+  "postCreateCommand": "printf feature-ready > /tmp/devsy-sandbox-feature"
+}

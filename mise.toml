@@ -1,0 +1,23 @@
+[tools]
+go = "1.26.9"
+golangci-lint = "2.14.0"
+
+[tasks.test]
+description = "Run unit tests and static analysis"
+run = "go test -race ./... && go vet ./..."
+
+[tasks.lint]
+description = "Check formatting and lint"
+run = "test -z \"$(gofmt -l cmd internal integration)\" && golangci-lint run"
+
+[tasks.format]
+description = "Format Go source"
+run = "gofmt -w cmd internal integration"
+
+[tasks.build]
+description = "Build local provider executable"
+run = "mkdir -p dist && go build -o dist/devsy-provider-docker-sandbox ./cmd/devsy-provider-docker-sandbox"
+
+[tasks.package]
+description = "Generate a checksum-pinned manifest from qualified native artifacts"
+run = "go run ./cmd/package-provider \"$RELEASE_TAG\" dist internal/compat/profile.json"

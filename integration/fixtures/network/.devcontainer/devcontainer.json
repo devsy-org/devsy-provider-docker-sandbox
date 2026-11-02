@@ -1,0 +1,5 @@
+{
+  "name": "sandbox-native-network",
+  "build": {"dockerfile": "Dockerfile"},
+  "postCreateCommand": "printf network-ready > /tmp/devsy-sandbox-network"
+}

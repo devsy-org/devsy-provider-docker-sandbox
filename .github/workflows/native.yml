@@ -1,0 +1,130 @@
+name: Native provider package
+on:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+      core_ref:
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      version:
+        required: true
+        type: string
+      core_ref:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.hosts.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - id: hosts
+        shell: bash
+        run: |
+          jq -e '.qualified_hosts | length > 0' internal/compat/profile.json
+          matrix="$(jq -ce '[.qualified_hosts[] | split("/") as $p | {os:$p[0],arch:$p[1],runner:(if $p[0] == "darwin" then "macos-latest" elif $p[0] == "windows" then "windows-latest" elif $p[1] == "arm64" then "ubuntu-24.04-arm" else "ubuntu-latest" end),suffix:(if $p[0] == "windows" then ".exe" else "" end)}] | if length == (unique_by(.os,.arch) | length) then . else error("duplicate native host") end' internal/compat/profile.json)"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+  build:
+    needs: plan
+    runs-on: ${{ matrix.host.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        host: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+      - name: Compile and execute on target platform
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+          TARGET_OS: ${{ matrix.host.os }}
+          TARGET_ARCH: ${{ matrix.host.arch }}
+          SUFFIX: ${{ matrix.host.suffix }}
+        run: |
+          test "$(go env GOOS)" = "$TARGET_OS"
+          test "$(go env GOARCH)" = "$TARGET_ARCH"
+          mkdir -p dist
+          name="devsy-provider-docker-sandbox-$TARGET_OS-$TARGET_ARCH$SUFFIX"
+          go build -trimpath -ldflags "-X main.version=$VERSION" -o "dist/$name" ./cmd/devsy-provider-docker-sandbox
+          test "$("./dist/$name" version)" = "$VERSION"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: executable-${{ matrix.host.os }}-${{ matrix.host.arch }}
+          path: dist/*
+          if-no-files-found: error
+  manifest:
+    needs: [plan, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: provider
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: provider/go.mod
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          pattern: executable-*
+          path: dist
+          merge-multiple: true
+      - name: Generate and verify release bytes
+        working-directory: provider
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          go run ./cmd/package-provider "$VERSION" ../dist internal/compat/profile.json
+          cd ../dist
+          sha256sum --check checksums.txt
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: provider-release
+          path: dist/*
+          if-no-files-found: error
+  install:
+    needs: [plan, manifest]
+    runs-on: ${{ matrix.host.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        host: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: provider
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: devsy-org/devsy
+          ref: ${{ inputs.core_ref }}
+          path: devsy
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: devsy/go.mod
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: provider-release
+          path: dist
+      - name: Verify native Devsy parser, alias, downloader and rejection
+        working-directory: devsy
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          go build -o "$RUNNER_TEMP/devsy${{ matrix.host.suffix }}" .
+          go run ../provider/integration/provider_install.go "$RUNNER_TEMP/devsy${{ matrix.host.suffix }}" "$GITHUB_WORKSPACE/dist" "$VERSION"

@@ -1,0 +1,75 @@
+name: docker-sandbox
+version: {{.Tag}}
+description: Devcontainers in local Docker Sandboxes microVMs
+home: https://github.com/devsy-org/devsy-provider-docker-sandbox
+optionGroups:
+  - name: Machine resources
+    options:
+      - SBX_CPUS
+      - SBX_MEMORY
+      - SBX_ROOT_DISK
+      - SBX_DOCKER_DISK
+  - name: Host executable
+    options:
+      - SBX_PATH
+options:
+  SBX_PATH:
+    displayName: sbx executable
+    description: Executable name on PATH or absolute path to sbx.
+    default: sbx
+    global: true
+  SBX_CPUS:
+    displayName: CPUs
+    description: Virtual CPUs per machine. Applied when the machine is created.
+    default: "2"
+    mutable: false
+  SBX_MEMORY:
+    displayName: Memory
+    description: Memory per machine in MiB or GiB, such as 4096m or 4g.
+    default: 4g
+    mutable: false
+  SBX_ROOT_DISK:
+    displayName: Root disk
+    description: Guest operating system, Devsy agent and source storage.
+    default: 40g
+    mutable: false
+  SBX_DOCKER_DISK:
+    displayName: Docker data disk
+    description: Private Docker images, container layers and volumes.
+    default: 40g
+    mutable: false
+agent:
+  local: false
+  path: /usr/local/bin/devsy
+  dataPath: /var/lib/devsy/agent
+  driver: docker
+  docker:
+    path: docker
+    runtime: docker
+    elevation: none
+    install: false
+    configureDaemon: false
+    builder: buildx
+    env:
+      DOCKER_HOST: unix:///var/run/docker.sock
+      DOCKER_CONTEXT: ""
+      DOCKER_TLS_VERIFY: ""
+      DOCKER_CERT_PATH: ""
+exec:
+  cancellation: file
+  init: '"${DOCKER_SANDBOX_PROVIDER}" init'
+  create: '"${DOCKER_SANDBOX_PROVIDER}" create'
+  start: '"${DOCKER_SANDBOX_PROVIDER}" start'
+  stop: '"${DOCKER_SANDBOX_PROVIDER}" stop'
+  delete: '"${DOCKER_SANDBOX_PROVIDER}" delete'
+  status: '"${DOCKER_SANDBOX_PROVIDER}" status'
+  describe: '"${DOCKER_SANDBOX_PROVIDER}" describe'
+  command: '"${DOCKER_SANDBOX_PROVIDER}" command'
+binaries:
+  DOCKER_SANDBOX_PROVIDER:
+{{range .Binaries}}    - os: {{.OS}}
+      arch: {{.Arch}}
+      name: {{.Name}}
+      path: https://github.com/devsy-org/devsy-provider-docker-sandbox/releases/download/{{$.Tag}}/{{.Name}}
+      checksum: {{.Checksum}}
+{{end}}

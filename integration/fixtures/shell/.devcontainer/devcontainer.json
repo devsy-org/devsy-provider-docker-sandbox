@@ -1,0 +1,5 @@
+{
+  "name": "sandbox-native-shells",
+  "build": {"dockerfile": "Dockerfile"},
+  "postCreateCommand": "printf shells-ready > /tmp/devsy-sandbox-shells"
+}

@@ -1,0 +1,38 @@
+package sbx
+
+import (
+	"github.com/devsy-org/devsy-provider-docker-sandbox/internal/compat"
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestObservedUnavailableDaemonIsNotHealthy(t *testing.T) {
+	data, e := os.ReadFile(filepath.Join("testdata", "v0.50.1", "version-daemon-unavailable.json"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	var v Version
+	if e = exact(data, &v); e != nil {
+		t.Fatal(e)
+	}
+	if v.Client.Version != "v0.50.1" || v.Client.Revision != "ddb0268d7124b9cf98955d0b08ffd71a0dfcebe4" {
+		t.Fatalf("observed version changed: %+v", v.Client)
+	}
+	p := compat.Profile{DaemonSchema: "test-observed-unavailable", QualifiedDaemonVersions: map[string][]string{"v0.50.1": {"v0.50.1"}}}
+	if _, e = ServerVersion(v, p); e == nil {
+		t.Fatal("unavailable daemon accepted as healthy")
+	}
+}
+func TestObservedLoginErrorRequiresExactMatch(t *testing.T) {
+	data, e := os.ReadFile(filepath.Join("testdata", "v0.50.1", "inventory-not-signed-in.stderr"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	if !observedLoginFailure(data) {
+		t.Fatal("recorded login error not recognized")
+	}
+	if observedLoginFailure([]byte("not signed in")) {
+		t.Fatal("unqualified text misclassified as authentication")
+	}
+}

@@ -1,0 +1,15 @@
+{
+  "observed_at": "2026-11-02",
+  "host": "darwin/arm64",
+  "host_os_version": "darwin 25.6.0",
+  "sbx_revision": "ddb0268d7124b9cf98955d0b08ffd71a0dfcebe4",
+  "sbx_version": "v0.50.1",
+  "sbx_archive_sha256": "dc5f001c42698f5e18d274843ddb81c911ab2eee92000b1ddd722bfbf5028992",
+  "version_command": "sbx version --format json",
+  "version_exit": 0,
+  "version_stdout": "version-daemon-unavailable.json",
+  "inventory_command": "sbx ls --format json",
+  "inventory_exit": 1,
+  "inventory_stderr": "inventory-not-signed-in.stderr",
+  "evidence_boundary": "No successful inventory, daemon version, settings schema, sandbox creation or VM qualification was observed."
+}

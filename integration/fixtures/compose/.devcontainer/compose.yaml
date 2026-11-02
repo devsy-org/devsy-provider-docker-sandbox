@@ -1,0 +1,16 @@
+services:
+  app:
+    image: mcr.microsoft.com/devcontainers/base:ubuntu
+    command: sleep infinity
+    volumes:
+      - ../:/workspace
+      - sandbox-data:/var/lib/sandbox-data
+  database:
+    image: postgres:17
+    environment:
+      POSTGRES_PASSWORD: sandbox-test-only
+    volumes:
+      - sandbox-db:/var/lib/postgresql/data
+volumes:
+  sandbox-data:
+  sandbox-db:
