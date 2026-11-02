@@ -25,7 +25,12 @@ jobs:
       - run: go vet ./...
       - name: Check formatting
         shell: bash
-        run: test -z "$(gofmt -l cmd internal integration)"
+        run: |
+          unformatted="$(gofmt -l cmd internal integration)"
+          if [ -n "$unformatted" ]; then
+            printf 'Unformatted files:\n%s\n' "$unformatted" >&2
+            exit 1
+          fi
       - name: Build native candidate
         shell: bash
         run: go build -o "$RUNNER_TEMP/provider${{ runner.os == 'Windows' && '.exe' || '' }}" ./cmd/devsy-provider-docker-sandbox
