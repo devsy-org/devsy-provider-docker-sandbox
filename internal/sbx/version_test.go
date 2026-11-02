@@ -32,6 +32,9 @@ func TestObservedLoginErrorRequiresExactMatch(t *testing.T) {
 	if !observedLoginFailure(data) {
 		t.Fatal("recorded login error not recognized")
 	}
+	if !observedLoginFailure([]byte("error: not signed in to Docker\r\n  try: sbx login\r\n")) {
+		t.Fatal("Windows line endings changed observed authentication result")
+	}
 	if observedLoginFailure([]byte("not signed in")) {
 		t.Fatal("unqualified text misclassified as authentication")
 	}

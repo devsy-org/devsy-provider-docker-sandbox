@@ -122,8 +122,13 @@ func privateDir(path string) error {
 			return err
 		}
 	}
-	if err := os.Mkdir(path, 0700); err != nil && !os.IsExist(err) {
-		return err
+	if os.IsNotExist(err) {
+		if parent == path {
+			return err
+		}
+		if err := os.Mkdir(path, 0700); err != nil && !os.IsExist(err) {
+			return err
+		}
 	}
 	fi, err = os.Lstat(path)
 	if err != nil {

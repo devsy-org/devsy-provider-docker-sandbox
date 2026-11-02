@@ -52,8 +52,8 @@ func (b *stderrTail) Write(p []byte) (int, error) {
 	return n, nil
 }
 func observedLoginFailure(data []byte) bool {
-	return strings.TrimSpace(string(data)) == strings.TrimSpace(`error: not signed in to Docker
-  try: sbx login`)
+	return strings.ReplaceAll(strings.TrimSpace(string(data)), "\r\n", "\n") == `error: not signed in to Docker
+  try: sbx login`
 }
 func childEnv(extra []string) []string {
 	inherited := os.Environ()
