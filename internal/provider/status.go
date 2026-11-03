@@ -36,6 +36,9 @@ func (p Provider) Status(ctx context.Context) (string, error) {
 		return "", e
 	}
 	if !found {
+		if r.SandboxID != "" {
+			return "", compat.Fail("E_MACHINE_MISSING", "recorded backend ID unavailable")
+		}
 		if r.Operation != nil {
 			return "", compat.Fail("E_OPERATION_UNCERTAIN", "missing machine during active operation")
 		}

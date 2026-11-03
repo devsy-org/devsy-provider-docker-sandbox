@@ -101,7 +101,7 @@ func (p Provider) Create(ctx context.Context) (result error) {
 		}
 	} else {
 		if r.Operation != nil && r.Operation.LastAttemptID != "" {
-			return compat.Fail("E_OPERATION_UNCERTAIN", "previous create submitted a request; backend settlement must be acknowledged")
+			return p.markPriorCreateUncertain(&r)
 		}
 		if e = p.Backend.ShellSettings(ctx, p.Profile); e != nil {
 			return e
@@ -137,6 +137,13 @@ func (p Provider) Create(ctx context.Context) (result error) {
 		return e
 	}
 	return p.runReady(ctx, &r)
+}
+
+func (p Provider) markPriorCreateUncertain(r *state.Record) error {
+	return p.MarkUncertain(r, compat.Fail(
+		"E_OPERATION_UNCERTAIN",
+		"previous create submitted a request; backend settlement must be acknowledged",
+	))
 }
 func (p Provider) runReady(ctx context.Context, r *state.Record) error {
 	_, e := p.controlAttempt(ctx, r, "run", sbx.RunArgs(r.SandboxName), nil, 2*time.Minute)

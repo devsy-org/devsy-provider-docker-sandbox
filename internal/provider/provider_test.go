@@ -234,3 +234,106 @@ func TestReadinessBlocksUnmeasuredSizingBeforeBackendCall(t *testing.T) {
 		t.Fatalf("unqualified probe launched: %v, %v", attempts, err)
 	}
 }
+
+func reapedCreateRecord(t *testing.T, p Provider) state.Record {
+	t.Helper()
+	r, err := state.New(p.Identity, config.Spec{CPUs: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := state.Token()
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Operation.LastAttemptID = id
+	now, pid, exitCode := time.Now().UTC(), 42, 0
+	attempt := state.Attempt{
+		SchemaVersion: 1, AttemptID: id, OperationID: r.Operation.ID,
+		MachineKey: r.MachineKey, SandboxName: r.SandboxName,
+		Generation: r.Generation, Epoch: r.Epoch, Kind: "create",
+		Phase: "client_reaped", StartedAt: &now, CompletedAt: &now,
+		DiagnosticPID: &pid, DiagnosticStartIdentity: now.Format(time.RFC3339Nano),
+		Outcome: "normal_exit", ExitCode: &exitCode,
+	}
+	if err := p.Store.Save(r); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Store.SaveAttempt(attempt); err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+func TestPendingCreateProvenanceSurvivesIncompatibleTransition(t *testing.T) {
+	for _, kind := range []string{"stop", "delete", "start"} {
+		t.Run(kind, func(t *testing.T) {
+			p := localProvider(t)
+			r := reapedCreateRecord(t, p)
+			operationID, attemptID, epoch := r.Operation.ID, r.Operation.LastAttemptID, r.Epoch
+			lock, err := p.begin(context.Background(), &r, "stopping", "stopped", kind, kind)
+			if lock != nil {
+				_ = closeLock(lock)
+				t.Fatal("incompatible transition acquired a session lock")
+			}
+			if errorCode(err) != "E_OPERATION_UNCERTAIN" {
+				t.Fatalf("incompatible transition error = %v", err)
+			}
+			stored, err := p.Store.Load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if stored.Operation == nil || stored.Operation.ID != operationID ||
+				stored.Operation.LastAttemptID != attemptID || stored.Epoch != epoch {
+				t.Fatalf("create provenance changed: %+v", stored)
+			}
+		})
+	}
+}
+
+func TestAbsentReapedCreateCanBeAcknowledged(t *testing.T) {
+	p := localProvider(t)
+	r := reapedCreateRecord(t, p)
+	operationID, attemptID := r.Operation.ID, r.Operation.LastAttemptID
+	if err := p.markPriorCreateUncertain(&r); errorCode(err) != "E_OPERATION_UNCERTAIN" {
+		t.Fatalf("unsettled creation error = %v", err)
+	}
+	stored, err := p.Store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Operation == nil || stored.Operation.Phase != "uncertain" ||
+		stored.Operation.ID != operationID || stored.Operation.LastAttemptID != attemptID {
+		t.Fatalf("unsettled creation lost provenance: %+v", stored.Operation)
+	}
+	p.Profile = simulatedProfile(t)
+	p.Backend = simulatedInventory{}
+	if err := p.RecoverOperation(context.Background(), operationID); errorCode(err) != "E_OPERATION_UNCERTAIN" {
+		t.Fatalf("backend settlement error = %v", err)
+	}
+	stored, err = p.Store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Operation != nil || stored.Phase != "failed" ||
+		stored.LastErrorCode != "E_OPERATION_UNCERTAIN" || stored.SandboxID != "" {
+		t.Fatalf("acknowledged absent creation retained pending ownership: %+v", stored)
+	}
+}
+
+func TestStatusRejectsMissingPreviouslyOwnedMachine(t *testing.T) {
+	p := localProvider(t)
+	p.Profile = simulatedProfile(t)
+	p.Backend = simulatedInventory{}
+	r, err := state.New(p.Identity, config.Spec{CPUs: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Phase, r.DesiredState, r.SandboxID, r.Operation = "ready", "running", "owned-id", nil
+	if err := p.Store.Save(r); err != nil {
+		t.Fatal(err)
+	}
+	status, err := p.Status(context.Background())
+	if status != "" || errorCode(err) != "E_MACHINE_MISSING" {
+		t.Fatalf("missing owned machine status = %q, %v", status, err)
+	}
+}

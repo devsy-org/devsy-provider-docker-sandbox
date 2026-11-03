@@ -153,6 +153,9 @@ func (p Provider) begin(ctx context.Context, r *state.Record, phase, desired, ki
 	if e != nil {
 		return nil, e
 	}
+	if r.Operation != nil && r.Operation.Kind == "create" && r.Operation.LastAttemptID != "" && r.SandboxID == "" {
+		return nil, errors.Join(compat.Fail("E_OPERATION_UNCERTAIN", "prior create requires reconciliation"), closeLock(admission))
+	}
 	r.Epoch++
 	r.Phase = phase
 	r.DesiredState = desired

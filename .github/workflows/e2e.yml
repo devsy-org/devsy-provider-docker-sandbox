@@ -39,6 +39,7 @@ jobs:
           ' internal/compat/profile.json)"
           echo "hosts=$hosts" >> "$GITHUB_OUTPUT"
   vm:
+    name: Native VM ${{ matrix.host.host }}
     needs: plan
     environment: native-sandbox-qualification
     runs-on: ${{ matrix.host.runner }}
@@ -151,13 +152,23 @@ jobs:
               test "$captured" = "$expected"
             done
           done
-          jq -r '.hosts[].ci_run_url' <<< "$NATIVE_EVIDENCE" | while IFS= read -r url; do
+          jq -r '.hosts[] | [.host, .ci_run_url] | @tsv' <<< "$NATIVE_EVIDENCE" | while IFS=$'\t' read -r host url; do
             [[ "$url" =~ ^https://github.com/devsy-org/devsy-provider-docker-sandbox/actions/runs/([0-9]+)/job/([0-9]+)$ ]]
             run_id="${BASH_REMATCH[1]}"
             job_id="${BASH_REMATCH[2]}"
-            test "$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id" --jq .head_sha)" = "$CANDIDATE"
-            test "$(gh api "repos/$GITHUB_REPOSITORY/actions/jobs/$job_id" --jq .run_id)" = "$run_id"
-            test "$(gh api "repos/$GITHUB_REPOSITORY/actions/jobs/$job_id" --jq .conclusion)" = success
+            run="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id")"
+            job="$(gh api "repos/$GITHUB_REPOSITORY/actions/jobs/$job_id")"
+            test "$(jq -r '.head_sha // empty' <<< "$run")" = "$CANDIDATE"
+            test "$(jq -r '.path // empty' <<< "$run")" = ".github/workflows/release.yml"
+            test "$(jq -r '.event // empty' <<< "$run")" = workflow_dispatch
+            workflow_id="$(jq -r '.workflow_id // empty' <<< "$run")"
+            test -n "$workflow_id"
+            workflow="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow_id")"
+            test "$(jq -r '.path // empty' <<< "$workflow")" = ".github/workflows/release.yml"
+            test "$(jq -r '.run_id // empty' <<< "$job")" = "$run_id"
+            jq -e --arg host "$host" '.name | endswith("Native VM " + $host)' <<< "$job" >/dev/null
+            test "$(jq -r '.conclusion // empty' <<< "$job")" = success
+            jq -e 'all(.steps[]; .conclusion == "success") and any(.steps[]; .name == "Require native host, usable virtualization and authenticated sbx" and .conclusion == "success") and any(.steps[]; .name == "Exercise real Devsy workspaces and streams" and .conclusion == "success")' <<< "$job" >/dev/null
           done
           printf '%s\n' "$NATIVE_EVIDENCE" > "$RUNNER_TEMP/native-evidence.json"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
