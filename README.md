@@ -29,6 +29,8 @@ devsy provider set docker-sandbox -o SBX_CPUS=4 -o SBX_MEMORY=8g -o SBX_ROOT_DIS
 
 Normal stop/start preserves the VM's identity, source, containers, images and volumes. Rebuilding a devcontainer preserves the outer VM. Deleting a default workspace with its automatically deleted machine removes **all** guest data, including Docker named volumes, even without `--remove-volumes`. Deleting a workspace attached through an explicit shared machine retains that machine and other workspaces. Removing the provider installation does not remove its VMs or external recovery journals.
 
+In `--single-machine` mode, deleting the last workspace also deletes the shared VM and all guest data. Back up anything you need before deletion.
+
 ## Security and network authority
 
 The provider creates a mountless sandbox and does not provide the host project directory to `sbx`. That does not remove authority already granted by Docker Sandboxes network policy, registry credentials, proxy, host SSH agent or MCP integrations. Devsy may independently forward Git and Docker credentials, SSH and signing agents or configured secrets. Review both systems' settings. Do not assume clearing the client `SSH_AUTH_SOCK` disables a daemon-configured integration. The provider does not suppress or reconfigure host integrations.
