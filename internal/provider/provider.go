@@ -156,25 +156,25 @@ func (p Provider) begin(ctx context.Context, r *state.Record, phase, desired, ki
 	if r.Operation != nil && r.Operation.Kind == "create" && r.Operation.LastAttemptID != "" && r.SandboxID == "" {
 		return nil, errors.Join(compat.Fail("E_OPERATION_UNCERTAIN", "prior create requires reconciliation"), closeLock(admission))
 	}
-	r.Epoch++
-	r.Phase = phase
-	r.DesiredState = desired
-	if e = p.operation(r, kind, step); e != nil {
-		return nil, errors.Join(e, closeLock(admission))
-	}
-	if e = closeLock(admission); e != nil {
-		return nil, e
-	}
 	drainCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	sessions, e := p.Store.Acquire(drainCtx, "sessions", false)
 	if e != nil {
 		if ctx.Err() != nil {
-			return nil, ctx.Err()
+			return nil, errors.Join(ctx.Err(), closeLock(admission))
 		}
-		return nil, compat.Fail("E_ACTIVE_SESSIONS", "active sessions did not drain")
+		return nil, errors.Join(compat.Fail("E_ACTIVE_SESSIONS", "active sessions did not drain"), closeLock(admission))
 	}
 	if e = p.unsettled(*r); e != nil {
+		return nil, errors.Join(e, closeLock(sessions), closeLock(admission))
+	}
+	r.Epoch++
+	r.Phase = phase
+	r.DesiredState = desired
+	if e = p.operation(r, kind, step); e != nil {
+		return nil, errors.Join(e, closeLock(sessions), closeLock(admission))
+	}
+	if e = closeLock(admission); e != nil {
 		return nil, errors.Join(e, closeLock(sessions))
 	}
 	return sessions, nil

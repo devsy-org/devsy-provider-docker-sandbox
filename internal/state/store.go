@@ -239,6 +239,19 @@ func (s Store) Attempts() ([]Attempt, error) {
 	}
 	out := make([]Attempt, 0, len(entries))
 	for _, v := range entries {
+		if strings.HasPrefix(v.Name(), ".atomic-") && len(v.Name()) > len(".atomic-") && !strings.HasSuffix(v.Name(), ".json") {
+			fi, e := v.Info()
+			if e != nil {
+				return nil, compat.Wrap("E_STORAGE", e)
+			}
+			if !fi.Mode().IsRegular() || fi.Mode()&os.ModeSymlink != 0 || fi.Size() > 16<<20 {
+				return nil, compat.Fail("E_STORAGE", "unsafe attempt temp file")
+			}
+			if e := checkFile(fi); e != nil {
+				return nil, compat.Wrap("E_STORAGE", e)
+			}
+			continue
+		}
 		if !strings.HasSuffix(v.Name(), ".json") {
 			return nil, compat.Fail("E_STORAGE", "unexpected attempt file")
 		}

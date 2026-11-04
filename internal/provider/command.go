@@ -135,16 +135,24 @@ func (p Provider) Command(ctx context.Context, program string, stdin io.Reader, 
 			}
 		}()
 		e = proc.Wait(watchCtx)
+		cancelled := watchCtx.Err() != nil
 		stopWatch()
 		<-done
 		if errorCode(e) == "E_UNCLEAN_ATTEMPT" {
 			return e
 		}
+		var interrupted error
+		select {
+		case interrupted = <-watchErr:
+		default:
+		}
 		now = time.Now().UTC()
 		a.Phase = "client_reaped"
 		a.CompletedAt = &now
 		a.Outcome = "normal_exit"
-		if watchCtx.Err() != nil {
+		if interrupted != nil {
+			a.Outcome = "interrupted"
+		} else if cancelled {
 			a.Outcome = "cancelled"
 		}
 		if code, ok := sbx.ExitCode(e); ok {
@@ -156,13 +164,11 @@ func (p Provider) Command(ctx context.Context, program string, stdin io.Reader, 
 		if saveErr = p.Store.SaveAttempt(a); saveErr != nil {
 			return errors.Join(e, saveErr)
 		}
+		if interrupted != nil {
+			return interrupted
+		}
 		if ctx.Err() != nil {
 			return ctx.Err()
-		}
-		select {
-		case watcher := <-watchErr:
-			return watcher
-		default:
 		}
 		return e
 	}

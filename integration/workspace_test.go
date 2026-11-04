@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -99,10 +100,25 @@ func TestNativeWorkspace(t *testing.T) {
 	})
 	t.Run("allowed build and denied runtime network", func(t *testing.T) {
 		deniedURL := requiredEnv(t, "SBX_NATIVE_DENIED_URL")
+		expectedCode := requiredEnv(t, "SBX_NATIVE_DENIED_CURL_EXIT_CODE")
+		expectedStderr := requiredEnv(t, "SBX_NATIVE_DENIED_CURL_STDERR")
+		code, err := strconv.Atoi(expectedCode)
+		if err != nil || code < 1 || code > 255 {
+			t.Fatal("native denied-network curl exit status must be a number from 1 to 255")
+		}
+		switch code {
+		case 5, 6, 7, 28, 35, 51, 52, 55, 56, 60:
+			t.Fatal("generic curl network failure cannot establish policy denial")
+		}
 		id := h.createWorkspace(t, "network")
 		assertGuest(t, h, id, "test -s /tmp/devsy-sandbox-allowed-https")
 		assertGuest(t, h, id, "curl --fail --silent --show-error --max-time 30 https://example.com/ >/dev/null")
-		h.run(t, nil, "workspace", "exec", id, "--", "sh", "-c", "if curl --fail --silent --show-error --max-time 10 \"$1\" >/dev/null 2>&1; then exit 1; fi", "sh", deniedURL)
+		script := "if output=$(curl --fail --silent --show-error --max-time 10 --output /dev/null -- \"$1\" 2>&1); then exit 1; else status=$?; fi; [ \"$status\" -eq \"$2\" ] && [ \"$output\" = \"$3\" ]"
+		command := exec.CommandContext(h.ctx, h.devsy, "--no-status", "workspace", "exec", id, "--", "sh", "-c", script, "sh", deniedURL, expectedCode, expectedStderr)
+		command.Env = append(os.Environ(), "DEVSY_HOME="+h.home)
+		if _, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("runtime network denial did not match configured curl exit status and stderr: %v", err)
+		}
 	})
 }
 

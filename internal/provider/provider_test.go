@@ -9,7 +9,9 @@ import (
 	"github.com/devsy-org/devsy-provider-docker-sandbox/internal/sbx"
 	"github.com/devsy-org/devsy-provider-docker-sandbox/internal/state"
 	"io"
+	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"testing"
 	"time"
@@ -335,5 +337,228 @@ func TestStatusRejectsMissingPreviouslyOwnedMachine(t *testing.T) {
 	status, err := p.Status(context.Background())
 	if status != "" || errorCode(err) != "E_MACHINE_MISSING" {
 		t.Fatalf("missing owned machine status = %q, %v", status, err)
+	}
+}
+
+func TestBeginDoesNotPersistTransitionWhenDrainFails(t *testing.T) {
+	p := localProvider(t)
+	r, err := state.New(p.Identity, config.Spec{CPUs: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Phase, r.DesiredState, r.SandboxID, r.Operation = "ready", "running", "owned-id", nil
+	if err := p.Store.Save(r); err != nil {
+		t.Fatal(err)
+	}
+	before, err := p.Store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, err := p.Store.Acquire(context.Background(), "sessions", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = closeLock(lease) }()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	sessions, err := p.begin(ctx, &r, "deleting", "deleted", "delete", "rm")
+	if sessions != nil || !errors.Is(err, context.Canceled) {
+		t.Fatalf("failed drain returned lock %v, error %v", sessions, err)
+	}
+	after, err := p.Store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(before, after) || r.Epoch != before.Epoch || r.Operation != nil {
+		t.Fatalf("failed drain changed durable ownership: before %+v, after %+v", before, after)
+	}
+	admission, err := p.Store.TryAcquire("admission", false)
+	if err != nil {
+		t.Fatalf("failed drain retained admission lock: %v", err)
+	}
+	if err := closeLock(admission); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBeginPreservesUnsettledOperationAndIntent(t *testing.T) {
+	p := localProvider(t)
+	r, err := state.New(p.Identity, config.Spec{CPUs: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Phase, r.DesiredState, r.SandboxID, r.Operation = "ready", "running", "owned-id", nil
+	if err := p.Store.Save(r); err != nil {
+		t.Fatal(err)
+	}
+	before, err := p.Store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := state.Token()
+	if err != nil {
+		t.Fatal(err)
+	}
+	attempt := state.Attempt{SchemaVersion: 1, AttemptID: id, MachineKey: r.MachineKey, Generation: r.Generation, SandboxName: r.SandboxName, Epoch: r.Epoch, Kind: "command", Phase: "started", Outcome: "unknown"}
+	if err := p.Store.SaveAttempt(attempt); err != nil {
+		t.Fatal(err)
+	}
+	sessions, err := p.begin(context.Background(), &r, "deleting", "deleted", "delete", "rm")
+	if sessions != nil || errorCode(err) != "E_UNCLEAN_ATTEMPT" {
+		t.Fatalf("unsettled attempt returned lock %v, error %v", sessions, err)
+	}
+	after, err := p.Store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(before, after) || r.Epoch != before.Epoch || r.Operation != nil {
+		t.Fatalf("unsettled attempt changed durable ownership: before %+v, after %+v", before, after)
+	}
+}
+
+func TestStatusDeletedRecordWithMissingOwnedIDIsNotNotFound(t *testing.T) {
+	p := localProvider(t)
+	p.Profile = simulatedProfile(t)
+	p.Backend = simulatedInventory{}
+	r, err := state.New(p.Identity, config.Spec{CPUs: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Phase, r.DesiredState, r.SandboxID, r.Operation = "deleted", "deleted", "owned-id", nil
+	if err := p.Store.Save(r); err != nil {
+		t.Fatal(err)
+	}
+	status, err := p.Status(context.Background())
+	if status != "" || errorCode(err) != "E_MACHINE_MISSING" {
+		t.Fatalf("deleted record with missing owned ID status = %q, %v", status, err)
+	}
+}
+
+type simulatedCommandBackend struct {
+	simulatedInventory
+	executable string
+	store      state.Store
+}
+
+func (b simulatedCommandBackend) Start(ctx context.Context, _ []string, _ []string, stdin io.Reader, stdout, stderr io.Writer) (*sbx.Process, error) {
+	return (sbx.Client{Path: b.executable, Store: b.store}).Start(ctx, []string{"-test.run=^TestCommandChildHelper$"}, nil, stdin, stdout, stderr)
+}
+
+func TestCommandChildHelper(t *testing.T) {
+	mode := os.Getenv("PROVIDER_COMMAND_TEST_CHILD")
+	if mode == "" {
+		return
+	}
+	if _, err := os.Stdout.Write([]byte("ready")); err != nil {
+		os.Exit(2)
+	}
+	if mode == "exit" {
+		os.Exit(7)
+	}
+	for {
+		time.Sleep(time.Hour)
+	}
+}
+
+type commandSignalWriter func([]byte) (int, error)
+
+func (w commandSignalWriter) Write(data []byte) (int, error) { return w(data) }
+
+func TestCommandAttemptOutcomes(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test-only Devsy version executable uses a POSIX shell")
+	}
+	for _, tc := range []struct {
+		name, mode, outcome, code string
+	}{
+		{name: "normal nonzero exit", mode: "exit", outcome: "normal_exit"},
+		{name: "caller cancellation", mode: "wait", outcome: "cancelled"},
+		{name: "watcher interruption", mode: "wait", outcome: "interrupted", code: "E_ACTIVE_SESSIONS"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := localProvider(t)
+			p.Profile = simulatedProfile(t)
+			p.Config.Spec = config.Spec{CPUs: 1}
+			p.Profile.MinimumDevsyVersion = "1.2.3"
+			devsy := filepath.Join(t.TempDir(), "devsy-version")
+			if err := os.WriteFile(devsy, []byte("#!/bin/sh\nprintf 'v1.2.3\\n'\n"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			p.Config.Devsy = devsy
+			t.Setenv("PROVIDER_COMMAND_TEST_CHILD", tc.mode)
+			r, err := state.New(p.Identity, p.Config.Spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r.Phase, r.DesiredState, r.SandboxID, r.Operation = "ready", "running", "unit-id", nil
+			if err := p.Store.Save(r); err != nil {
+				t.Fatal(err)
+			}
+			executable, err := os.Executable()
+			if err != nil {
+				t.Fatal(err)
+			}
+			p.Backend = simulatedCommandBackend{
+				simulatedInventory: simulatedInventory{sandbox: sbx.Sandbox{ID: r.SandboxID, Name: r.SandboxName, State: "unit-running"}},
+				executable:         executable,
+				store:              p.Store,
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			ready := make(chan struct{}, 1)
+			writer := commandSignalWriter(func(data []byte) (int, error) {
+				select {
+				case ready <- struct{}{}:
+				default:
+				}
+				return len(data), nil
+			})
+			result := make(chan error, 1)
+			go func() { result <- p.Command(ctx, "unit-command", nil, writer, io.Discard) }()
+			if tc.mode == "wait" {
+				select {
+				case <-ready:
+				case err := <-result:
+					t.Fatalf("command exited before child readiness: %v", err)
+				case <-ctx.Done():
+					t.Fatal(ctx.Err())
+				}
+			}
+			switch tc.outcome {
+			case "cancelled":
+				cancel()
+			case "interrupted":
+				r.Epoch++
+				if err := p.Store.Save(r); err != nil {
+					t.Fatal(err)
+				}
+			}
+			select {
+			case err := <-result:
+				if tc.code != "" {
+					if errorCode(err) != tc.code {
+						t.Fatalf("command error = %v", err)
+					}
+				} else if tc.outcome == "cancelled" {
+					if !errors.Is(err, context.Canceled) {
+						t.Fatalf("command cancellation = %v", err)
+					}
+				} else if code, ok := sbx.ExitCode(err); !ok || code != 7 {
+					t.Fatalf("command exit = %v", err)
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatal("command did not finish")
+			}
+			attempts, err := p.Store.Attempts()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(attempts) != 1 || attempts[0].Phase != "client_reaped" || attempts[0].Outcome != tc.outcome || attempts[0].StartedAt == nil || attempts[0].CompletedAt == nil {
+				t.Fatalf("attempt outcome = %+v", attempts)
+			}
+			if tc.outcome == "normal_exit" && (attempts[0].ExitCode == nil || *attempts[0].ExitCode != 7) {
+				t.Fatalf("normal command exit code = %+v", attempts[0].ExitCode)
+			}
+		})
 	}
 }

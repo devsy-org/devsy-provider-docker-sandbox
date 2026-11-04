@@ -75,7 +75,7 @@ jobs:
           test "$(go env GOOS)/$(go env GOARCH)" = "$TARGET_HOST"
           test -n "$SBX_PATH"
           case "$TARGET_HOST" in
-            linux/*) test -r /dev/kvm && test -w /dev/kvm; . /etc/os-release; test "$ID" = ubuntu; test "${VERSION_ID%%.*}" -ge 24 ;;
+            linux/*) test -r /dev/kvm; test -w /dev/kvm; . /etc/os-release; test "$ID" = ubuntu; test "${VERSION_ID%%.*}" -ge 24 ;;
             darwin/*) test "$(sw_vers -productVersion | cut -d. -f1)" -ge 14; test "$(sysctl -n kern.hv_support)" = 1 ;;
             windows/*) powershell.exe -NoProfile -Command 'if ((Get-WindowsOptionalFeature -Online -FeatureName HypervisorPlatform).State -ne "Enabled") { exit 1 }' ;;
           esac
@@ -100,6 +100,8 @@ jobs:
           DEVSY_NATIVE_CORE_SOURCE: ${{ github.workspace }}/devsy
           SBX_PATH: ${{ vars.SBX_NATIVE_EXECUTABLE }}
           SBX_NATIVE_DENIED_URL: ${{ vars.SBX_NATIVE_DENIED_URL }}
+          SBX_NATIVE_DENIED_CURL_EXIT_CODE: ${{ vars.SBX_NATIVE_DENIED_CURL_EXIT_CODE }}
+          SBX_NATIVE_DENIED_CURL_STDERR: ${{ vars.SBX_NATIVE_DENIED_CURL_STDERR }}
         run: |
           export DEVSY_NATIVE_CORE_BIN="$RUNNER_TEMP/devsy${{ runner.os == 'Windows' && '.exe' || '' }}"
           export DEVSY_NATIVE_CANCEL_HELPER="$RUNNER_TEMP/native-cancel${{ runner.os == 'Windows' && '.exe' || '' }}"

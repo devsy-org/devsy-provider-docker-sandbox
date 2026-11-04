@@ -60,6 +60,77 @@ func TestDurableJournalAndAttempts(t *testing.T) {
 		t.Fatal(e)
 	}
 }
+func TestAttemptsIgnoreInterruptedAtomicSave(t *testing.T) {
+	s := Store{Root: filepath.Join(t.TempDir(), "devsy-provider-docker-sandbox", "state-v1"), Key: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+	if err := s.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	a := Attempt{SchemaVersion: 1, AttemptID: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", MachineKey: s.Key, Generation: "cccccccccccccccccccccccccccccccc", Phase: "admitted"}
+	if err := s.SaveAttempt(a); err != nil {
+		t.Fatal(err)
+	}
+	temp, err := os.CreateTemp(filepath.Join(s.Dir(), "attempts"), ".atomic-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := temp.Close(); err != nil {
+		t.Fatal(err)
+	}
+	attempts, err := s.Attempts()
+	if err != nil || len(attempts) != 1 || attempts[0].AttemptID != a.AttemptID {
+		t.Fatalf("interrupted save changed visible attempts: %v, %v", attempts, err)
+	}
+	incomplete, err := s.Incomplete()
+	if err != nil || len(incomplete) != 1 || incomplete[0].AttemptID != a.AttemptID {
+		t.Fatalf("interrupted save changed incomplete attempts: %v, %v", incomplete, err)
+	}
+}
+
+func TestAttemptsRejectUnsafeEntries(t *testing.T) {
+	cases := []struct {
+		name  string
+		entry string
+		make  func(string) error
+	}{
+		{"unexpected file", "other", func(path string) error { return os.WriteFile(path, nil, 0600) }},
+		{"empty temp suffix", ".atomic-", func(path string) error { return os.WriteFile(path, nil, 0600) }},
+		{"temp masquerading as journal", ".atomic-fake.json", func(path string) error { return os.WriteFile(path, nil, 0600) }},
+		{"temp directory", ".atomic-fake", func(path string) error { return os.Mkdir(path, 0700) }},
+		{"public temp", ".atomic-public", func(path string) error {
+			if err := os.WriteFile(path, nil, 0600); err != nil {
+				return err
+			}
+			return os.Chmod(path, 0644)
+		}},
+		{"temp symlink", ".atomic-link", func(path string) error {
+			return os.Symlink(filepath.Join(filepath.Dir(path), "missing"), path)
+		}},
+		{"journal symlink", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.json", func(path string) error {
+			return os.Symlink(filepath.Join(filepath.Dir(path), "missing"), path)
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if os.PathSeparator == 92 && (tc.name == "temp symlink" || tc.name == "journal symlink" || tc.name == "public temp") {
+				t.Skip("symlink privileges and mode checks differ on Windows")
+			}
+			s := Store{Root: filepath.Join(t.TempDir(), "devsy-provider-docker-sandbox", "state-v1"), Key: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+			if err := s.Ensure(); err != nil {
+				t.Fatal(err)
+			}
+			if err := tc.make(filepath.Join(s.Dir(), "attempts", tc.entry)); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.Attempts(); err == nil {
+				t.Fatal("unsafe attempt entry accepted")
+			}
+			if _, err := s.Incomplete(); err == nil {
+				t.Fatal("unsafe attempt entry bypassed incomplete scan")
+			}
+		})
+	}
+}
+
 func TestCrossProcessLockCancellation(t *testing.T) {
 	s := Store{Root: filepath.Join(t.TempDir(), "devsy-provider-docker-sandbox", "state-v1"), Key: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
 	lease, e := s.Acquire(context.Background(), "mutation", false)
