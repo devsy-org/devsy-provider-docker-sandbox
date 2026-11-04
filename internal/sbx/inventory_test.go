@@ -28,26 +28,33 @@ func TestMeasuredInventoryStatusAndDetached(t *testing.T) {
 		{"inventory-stopped.json", "stopped"},
 	} {
 		t.Run(tc.status, func(t *testing.T) {
-			items, err := decodeInventory(readMeasuredFixture(t, tc.file), inventoryProfile())
+			items, err := decodeInventory(readMeasuredFixture(t, tc.file))
 			if err != nil || len(items) != 1 || items[0].ID != "42e3e9d3-6e79-46e5-ad17-a5d5bba50363" || items[0].State != tc.status || !items[0].Detached {
 				t.Fatalf("observed inventory = %+v, %v", items, err)
 			}
 		})
 	}
-	items, err := decodeInventory([]byte(`[{"id":"owned-id","name":"owned","status":"stopped"}]`), inventoryProfile())
+	items, err := decodeInventory([]byte(`[{"id":"owned-id","name":"owned","status":"stopped"}]`))
 	if err != nil || len(items) != 1 || items[0].Detached {
 		t.Fatalf("stopped sandbox without detached flag = %+v, %v", items, err)
 	}
 }
 
 func TestObservedMountedWorkspaceIsNotMountless(t *testing.T) {
-	items, err := decodeInventory(readMeasuredFixture(t, "inventory-mounted.json"), inventoryProfile())
+	items, err := decodeInventory(readMeasuredFixture(t, "inventory-mounted.json"))
 	if err != nil || len(items) != 1 || len(items[0].Workspaces) != 1 {
 		t.Fatalf("mounted sandbox inventory = %+v, %v", items, err)
 	}
 }
 
-func TestInventoryRejectsIncompleteDuplicateAndUnknownStatus(t *testing.T) {
+func TestInventoryKeepsUnrelatedAttachedOrUnknownState(t *testing.T) {
+	items, err := decodeInventory([]byte(`[{"id":"owned-id","name":"owned","status":"running","detached":true},{"id":"other-id","name":"unrelated","status":"waking","detached":false}]`))
+	if err != nil || len(items) != 2 || items[0].State != "running" || items[1].State != "waking" || items[1].Detached {
+		t.Fatalf("unrelated attached sandbox blocked inventory: %+v, %v", items, err)
+	}
+}
+
+func TestInventoryRejectsMalformedOrConflictingIdentity(t *testing.T) {
 	cases := []struct {
 		name string
 		data string
@@ -61,9 +68,6 @@ func TestInventoryRejectsIncompleteDuplicateAndUnknownStatus(t *testing.T) {
 		{"duplicate id field", `[{"id":"id","id":"other","name":"owned","status":"stopped"}]`, "E_SBX_SCHEMA"},
 		{"duplicate name field", `[{"id":"id","name":"owned","name":"other","status":"stopped"}]`, "E_SBX_SCHEMA"},
 		{"duplicate status field", `[{"id":"id","name":"owned","status":"stopped","status":"running","detached":true}]`, "E_SBX_SCHEMA"},
-		{"unknown status", `[{"id":"id","name":"owned","status":"waking"}]`, "E_SBX_STATE_UNKNOWN"},
-		{"running without detached", `[{"id":"id","name":"owned","status":"running"}]`, "E_SBX_SCHEMA"},
-		{"running attached", `[{"id":"id","name":"owned","status":"running","detached":false}]`, "E_SBX_SCHEMA"},
 		{"detached wrong type", `[{"id":"id","name":"owned","status":"stopped","detached":"false"}]`, "E_SBX_SCHEMA"},
 		{"workspaces null", `[{"id":"id","name":"owned","status":"stopped","workspaces":null}]`, "E_SBX_SCHEMA"},
 		{"workspaces object", `[{"id":"id","name":"owned","status":"stopped","workspaces":{}}]`, "E_SBX_SCHEMA"},
@@ -75,7 +79,7 @@ func TestInventoryRejectsIncompleteDuplicateAndUnknownStatus(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := decodeInventory([]byte(tc.data), inventoryProfile())
+			_, err := decodeInventory([]byte(tc.data))
 			if e, ok := err.(*compat.Error); !ok || e.Code != tc.code {
 				t.Fatalf("inventory error = %v, want %s", err, tc.code)
 			}

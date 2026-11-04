@@ -88,6 +88,18 @@ func (p Provider) load() (state.Record, error) {
 	return r, nil
 }
 func (p Provider) observe(ctx context.Context, r state.Record) (sbx.Sandbox, bool, error) {
+	item, found, err := p.observeSnapshot(ctx, r)
+	if err == nil || ctx.Err() != nil {
+		return item, found, err
+	}
+	var qualified *compat.Error
+	if !errors.As(err, &qualified) || (qualified.Code != "E_SBX_STATE_UNKNOWN" && qualified.Code != "E_SBX_UNAVAILABLE") {
+		return item, found, err
+	}
+	return p.observeSnapshot(ctx, r)
+}
+
+func (p Provider) observeSnapshot(ctx context.Context, r state.Record) (sbx.Sandbox, bool, error) {
 	items, e := p.Backend.Inventory(ctx, p.Profile)
 	if e != nil {
 		return sbx.Sandbox{}, false, e
@@ -95,6 +107,13 @@ func (p Provider) observe(ctx context.Context, r state.Record) (sbx.Sandbox, boo
 	item, found := items.Find(r.SandboxName)
 	if !found {
 		return sbx.Sandbox{}, false, nil
+	}
+	kind, qualified := p.Profile.InventoryStates[item.State]
+	if !qualified || (kind != "running" && kind != "stopped" && kind != "transitional" && kind != "failed") {
+		return sbx.Sandbox{}, false, compat.Fail("E_SBX_STATE_UNKNOWN", "unqualified owned sandbox state %q", item.State)
+	}
+	if kind == "running" && !item.Detached {
+		return sbx.Sandbox{}, false, compat.Fail("E_SBX_SCHEMA", "owned running sandbox is not detached")
 	}
 	if r.SandboxID != "" && item.ID != r.SandboxID {
 		return sbx.Sandbox{}, false, compat.Fail("E_OWNERSHIP_MISMATCH", "sandbox name matches a different backend ID")

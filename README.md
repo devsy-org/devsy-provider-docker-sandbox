@@ -49,6 +49,8 @@ Use `devsy provider list --result-format=json` to identify the installed alias a
 
 Doctor reads the external journal and scoped backend observations without booting a stopped VM, uploading diagnostics or printing credentials. The machine key is the exact key printed in a provider failure or journal record. It reports client/daemon compatibility, the recorded sandbox name and immutable ID, and the observed state. An unavailable inventory is not proof the machine disappeared.
 
+The provider retries a transient inventory and inspection disagreement once. It never treats a changed immutable ID, a host workspace mount, or an unqualified state as a missing machine.
+
 If creation fails, diagnose the exact journal key. Resolve an unclean child attempt or uncertain backend operation before retrying. A matching existing VM resumes readiness. A resource that disappeared after its immutable ID was stored is missing data and is never recreated automatically. A failed Devsy workspace creation can remove the machine registration while leaving the provider's journal. In that case, use the exact `devsy machine create` command rendered by doctor with the **recorded** machine ID, context, current alias and resource values; verify its machine folder matches the journal; then repeat the original workspace up command. Do not substitute current option defaults.
 
 If an owned `sbx` client was orphaned, terminate that exact process or restart the host before acknowledging only its attempt:

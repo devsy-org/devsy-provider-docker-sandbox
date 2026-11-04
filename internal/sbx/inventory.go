@@ -26,10 +26,10 @@ func (c Client) Inventory(ctx context.Context, p compat.Profile) (Inventory, err
 	if e != nil {
 		return nil, compat.Wrap("E_SBX_UNAVAILABLE", e)
 	}
-	return decodeInventory(data, p)
+	return decodeInventory(data)
 }
 
-func decodeInventory(data []byte, p compat.Profile) (Inventory, error) {
+func decodeInventory(data []byte) (Inventory, error) {
 	var entries []json.RawMessage
 	if e := exact(data, &entries); e != nil || entries == nil {
 		return nil, compat.Fail("E_SBX_SCHEMA", "invalid sbx inventory JSON")
@@ -53,10 +53,6 @@ func decodeInventory(data []byte, p compat.Profile) (Inventory, error) {
 		}
 		ids[id] = true
 		names[name] = true
-		kind, ok := p.InventoryStates[status]
-		if !ok || (kind != "running" && kind != "stopped" && kind != "transitional") {
-			return nil, compat.Fail("E_SBX_STATE_UNKNOWN", "unqualified sbx state %q", status)
-		}
 		var detached bool
 		if value, present := fields["detached"]; present && (string(value) == "null" || json.Unmarshal(value, &detached) != nil) {
 			return nil, compat.Fail("E_SBX_SCHEMA", "invalid sbx detached field")
@@ -71,9 +67,6 @@ func decodeInventory(data []byte, p compat.Profile) (Inventory, error) {
 					return nil, compat.Fail("E_SBX_SCHEMA", "empty sbx workspace path")
 				}
 			}
-		}
-		if kind == "running" && !detached {
-			return nil, compat.Fail("E_SBX_SCHEMA", "running sandbox is not detached")
 		}
 		inventory = append(inventory, Sandbox{ID: id, Name: name, State: status, Detached: detached, Workspaces: workspaces})
 	}

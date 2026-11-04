@@ -241,6 +241,9 @@ func (s Store) Attempts() ([]Attempt, error) {
 	for _, v := range entries {
 		if strings.HasPrefix(v.Name(), ".atomic-") && len(v.Name()) > len(".atomic-") && !strings.HasSuffix(v.Name(), ".json") {
 			fi, e := v.Info()
+			if errors.Is(e, os.ErrNotExist) {
+				continue
+			}
 			if e != nil {
 				return nil, compat.Wrap("E_STORAGE", e)
 			}

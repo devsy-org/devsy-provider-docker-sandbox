@@ -125,6 +125,75 @@ func (b simulatedInventory) ShellSettings(context.Context, compat.Profile) error
 func (b simulatedInventory) Start(context.Context, []string, []string, io.Reader, io.Writer, io.Writer) (*sbx.Process, error) {
 	return nil, errors.New("unexpected child launch")
 }
+
+type snapshotBackend struct {
+	simulatedInventory
+	inventory func() (sbx.Inventory, error)
+	inspect   func() (sbx.Inspection, error)
+}
+
+func (b snapshotBackend) Inventory(context.Context, compat.Profile) (sbx.Inventory, error) {
+	return b.inventory()
+}
+
+func (b snapshotBackend) Inspect(context.Context, compat.Profile, string) (sbx.Inspection, error) {
+	return b.inspect()
+}
+
+func TestObserveRetriesRacingSnapshots(t *testing.T) {
+	p := localProvider(t)
+	p.Profile = compat.Profile{InventoryStates: map[string]string{"running": "running", "stopped": "stopped"}}
+	r, err := state.New(p.Identity, config.Spec{CPUs: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.SandboxID = "owned-id"
+	running := sbx.Sandbox{ID: r.SandboxID, Name: r.SandboxName, State: "running", Detached: true}
+	stopped := running
+	stopped.State = "stopped"
+	inspectedStopped := sbx.Inspection{Name: r.SandboxName, State: "stopped", ImageDigest: "sha256:unit-image", RuntimeMounts: []json.RawMessage{}}
+	t.Run("state settles between reads", func(t *testing.T) {
+		inventories, inspections := 0, 0
+		p.Backend = snapshotBackend{
+			inventory: func() (sbx.Inventory, error) {
+				inventories++
+				if inventories == 1 {
+					return sbx.Inventory{running}, nil
+				}
+				return sbx.Inventory{stopped}, nil
+			},
+			inspect: func() (sbx.Inspection, error) {
+				inspections++
+				return inspectedStopped, nil
+			},
+		}
+		item, found, err := p.observe(context.Background(), r)
+		if err != nil || !found || item.State != "stopped" || inventories != 2 || inspections != 2 {
+			t.Fatalf("settled snapshot = %+v found=%t inventories=%d inspections=%d error=%v", item, found, inventories, inspections, err)
+		}
+	})
+	t.Run("removed before inspect", func(t *testing.T) {
+		inventories, inspections := 0, 0
+		p.Backend = snapshotBackend{
+			inventory: func() (sbx.Inventory, error) {
+				inventories++
+				if inventories == 1 {
+					return sbx.Inventory{running}, nil
+				}
+				return sbx.Inventory{}, nil
+			},
+			inspect: func() (sbx.Inspection, error) {
+				inspections++
+				return sbx.Inspection{}, compat.Fail("E_SBX_UNAVAILABLE", "sandbox disappeared during inspection")
+			},
+		}
+		_, found, err := p.observe(context.Background(), r)
+		if err != nil || found || inventories != 2 || inspections != 1 {
+			t.Fatalf("removed snapshot found=%t inventories=%d inspections=%d error=%v", found, inventories, inspections, err)
+		}
+	})
+}
+
 func TestObserveInspectsOnlyMatchingOwnedSandbox(t *testing.T) {
 	p := localProvider(t)
 	p.Profile = compat.Profile{InventoryStates: map[string]string{"running": "running", "stopped": "stopped"}}
@@ -203,6 +272,31 @@ func TestObserveRejectsInspectDisagreements(t *testing.T) {
 	}
 }
 
+func TestObserveRejectsUnqualifiedOwnedStateAndAttachedMode(t *testing.T) {
+	p := localProvider(t)
+	p.Profile = compat.Profile{InventoryStates: map[string]string{"running": "running", "stopped": "stopped"}}
+	r, err := state.New(p.Identity, config.Spec{CPUs: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.SandboxID = "owned-id"
+	for _, tc := range []struct {
+		name, state, code string
+		detached          bool
+	}{
+		{"unqualified state", "waking", "E_SBX_STATE_UNKNOWN", true},
+		{"attached running", "running", "E_SBX_SCHEMA", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			inspections := 0
+			p.Backend = simulatedInventory{sandbox: sbx.Sandbox{ID: r.SandboxID, Name: r.SandboxName, State: tc.state, Detached: tc.detached}, inspected: &inspections}
+			if _, found, err := p.observe(context.Background(), r); found || errorCode(err) != tc.code || inspections != 0 {
+				t.Fatalf("owned sandbox admission found=%t inspections=%d error=%v", found, inspections, err)
+			}
+		})
+	}
+}
+
 func simulatedProfile(t *testing.T) compat.Profile {
 	t.Helper()
 	p := compat.Profile{
@@ -226,7 +320,7 @@ func TestStatusWithActiveSessionAndOrphanedAttempt(t *testing.T) {
 		t.Fatal(err)
 	}
 	r.Phase, r.DesiredState, r.SandboxID, r.Operation = "ready", "running", "unit-id", nil
-	p.Backend = simulatedInventory{sandbox: sbx.Sandbox{ID: r.SandboxID, Name: r.SandboxName, State: "unit-running"}}
+	p.Backend = simulatedInventory{sandbox: sbx.Sandbox{ID: r.SandboxID, Name: r.SandboxName, State: "unit-running", Detached: true}}
 	if err := p.Store.Save(r); err != nil {
 		t.Fatal(err)
 	}
@@ -298,7 +392,7 @@ func TestUncertainCreationRequiresStartedExactAttempt(t *testing.T) {
 			if err := p.Store.SaveAttempt(a); err != nil {
 				t.Fatal(err)
 			}
-			p.Backend = simulatedInventory{sandbox: sbx.Sandbox{ID: "unit-existing-id", Name: r.SandboxName, State: "unit-running"}}
+			p.Backend = simulatedInventory{sandbox: sbx.Sandbox{ID: "unit-existing-id", Name: r.SandboxName, State: "unit-running", Detached: true}}
 			recoverErr := p.RecoverOperation(context.Background(), r.Operation.ID)
 			wantCode := "E_OPERATION_UNCERTAIN"
 			if tc.name == "not reaped" {
@@ -529,6 +623,30 @@ func TestStatusDeletedRecordWithMissingOwnedIDIsNotNotFound(t *testing.T) {
 	}
 }
 
+func TestDeleteRefusesUnrecordedBackendWithoutLeavingActiveOperation(t *testing.T) {
+	p := localProvider(t)
+	p.Profile = simulatedProfile(t)
+	p.Profile.OperationResultSchema = compat.OperationResultSchemaV0501
+	r, err := state.New(p.Identity, config.Spec{CPUs: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Store.Save(r); err != nil {
+		t.Fatal(err)
+	}
+	p.Backend = simulatedInventory{sandbox: sbx.Sandbox{ID: "unrecorded-id", Name: r.SandboxName, State: "unit-running", Detached: true}}
+	if code := errorCode(p.Delete(context.Background())); code != "E_OWNERSHIP_MISMATCH" {
+		t.Fatalf("delete unrecorded backend error code = %s", code)
+	}
+	after, err := p.Store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Operation != nil || after.Phase != "failed" || after.SandboxID != "" || after.LastErrorCode != "E_OWNERSHIP_MISMATCH" {
+		t.Fatalf("refused delete persisted incorrect ownership state: %+v", after)
+	}
+}
+
 type simulatedCommandBackend struct {
 	simulatedInventory
 	executable string
@@ -594,7 +712,7 @@ func TestCommandAttemptOutcomes(t *testing.T) {
 				t.Fatal(err)
 			}
 			p.Backend = simulatedCommandBackend{
-				simulatedInventory: simulatedInventory{sandbox: sbx.Sandbox{ID: r.SandboxID, Name: r.SandboxName, State: "unit-running"}},
+				simulatedInventory: simulatedInventory{sandbox: sbx.Sandbox{ID: r.SandboxID, Name: r.SandboxName, State: "unit-running", Detached: true}},
 				executable:         executable,
 				store:              p.Store,
 			}

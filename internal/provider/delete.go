@@ -42,7 +42,7 @@ func (p Provider) Delete(ctx context.Context) (result error) {
 		return p.successful(&r, "deleted", "deleted")
 	}
 	if r.SandboxID == "" {
-		return compat.Fail("E_OWNERSHIP_MISMATCH", "cannot delete a sandbox with no durably observed ID")
+		return p.failWithStep(&r, compat.Fail("E_OWNERSHIP_MISMATCH", "cannot delete a sandbox with no durably observed ID"))
 	}
 	out, e := p.controlAttempt(ctx, &r, "rm", sbx.RemoveArgs(r.SandboxName), nil, 3*time.Minute)
 	if e != nil {
