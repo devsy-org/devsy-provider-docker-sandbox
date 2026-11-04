@@ -2,6 +2,7 @@ package compat
 
 import (
 	"context"
+	"runtime"
 	"testing"
 )
 
@@ -35,5 +36,41 @@ func TestUnmeasuredDiskCapacityFailsClosed(t *testing.T) {
 	tagged, ok := err.(*Error)
 	if !ok || tagged.Code != "E_GUEST_CAPABILITY" {
 		t.Fatalf("unmeasured disk overhead accepted: %v", err)
+	}
+}
+
+func TestMeasuredSchemaGates(t *testing.T) {
+	p := Profile{
+		ShellSettingSchema:    ShellSettingSchemaV0501,
+		OperationResultSchema: OperationResultSchemaV0501,
+		QualifiedSBXVersions:  []string{"v0.50.1"},
+		QualifiedSBXRevisions: map[string]string{"v0.50.1": "ddb0268d7124b9cf98955d0b08ffd71a0dfcebe4"},
+		DiskSizingSchemas:     map[string]string{"darwin/arm64": DiskSizingSchemaDarwinARM64V0501},
+	}
+	if err := p.RequireShellSchema(); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.RequireOperationResultSchema(); err != nil {
+		t.Fatal(err)
+	}
+	err := p.RequireDiskSizingQualification()
+	if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
+		if err != nil {
+			t.Fatal(err)
+		}
+	} else if err == nil {
+		t.Fatal("unmeasured host accepted")
+	}
+	p.QualifiedSBXRevisions["v0.50.1"] = "unmeasured"
+	if err := p.RequireDiskSizingQualification(); err == nil {
+		t.Fatal("unmeasured client revision accepted")
+	}
+	p.ShellSettingSchema = "unmeasured"
+	if err := p.RequireShellSchema(); err == nil {
+		t.Fatal("unmeasured shell schema accepted")
+	}
+	p.OperationResultSchema = "unmeasured"
+	if err := p.RequireOperationResultSchema(); err == nil {
+		t.Fatal("unmeasured result schema accepted")
 	}
 }

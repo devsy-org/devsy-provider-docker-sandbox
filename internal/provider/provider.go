@@ -15,6 +15,7 @@ import (
 type Backend interface {
 	Version(context.Context) (sbx.Version, error)
 	Inventory(context.Context, compat.Profile) (sbx.Inventory, error)
+	Inspect(context.Context, compat.Profile, string) (sbx.Inspection, error)
 	ShellSettings(context.Context, compat.Profile) error
 	Start(context.Context, []string, []string, io.Reader, io.Writer, io.Writer) (*sbx.Process, error)
 }
@@ -92,13 +93,33 @@ func (p Provider) observe(ctx context.Context, r state.Record) (sbx.Sandbox, boo
 		return sbx.Sandbox{}, false, e
 	}
 	item, found := items.Find(r.SandboxName)
-	if found && r.SandboxID != "" && item.ID != r.SandboxID {
+	if !found {
+		return sbx.Sandbox{}, false, nil
+	}
+	if r.SandboxID != "" && item.ID != r.SandboxID {
 		return sbx.Sandbox{}, false, compat.Fail("E_OWNERSHIP_MISMATCH", "sandbox name matches a different backend ID")
 	}
-	if found && len(item.Workspaces) > 0 {
+	if len(item.Workspaces) != 0 {
 		return sbx.Sandbox{}, false, compat.Fail("E_OWNERSHIP_MISMATCH", "owned sandbox unexpectedly contains host workspace mounts")
 	}
-	return item, found, nil
+	inspected, e := p.Backend.Inspect(ctx, p.Profile, item.Name)
+	if e != nil {
+		return sbx.Sandbox{}, false, e
+	}
+	if inspected.Name != item.Name || (inspected.ID != "" && inspected.ID != item.ID) {
+		return sbx.Sandbox{}, false, compat.Fail("E_OWNERSHIP_MISMATCH", "sbx inspect identity disagrees with inventory")
+	}
+	if inspected.State != item.State {
+		return sbx.Sandbox{}, false, compat.Fail("E_SBX_STATE_UNKNOWN", "sbx inspect state disagrees with inventory")
+	}
+	if inspected.ImageDigest == "" || inspected.RuntimeMounts == nil {
+		return sbx.Sandbox{}, false, compat.Fail("E_SBX_SCHEMA", "incomplete sbx inspect image digest or runtime mounts")
+	}
+	if len(inspected.RuntimeMounts) != 0 || (r.Compatibility.TemplateIdentity != "" && inspected.ImageDigest != r.Compatibility.TemplateIdentity) {
+		return sbx.Sandbox{}, false, compat.Fail("E_OWNERSHIP_MISMATCH", "owned sandbox has unexpected mounts or image digest")
+	}
+	item.Template = inspected.ImageDigest
+	return item, true, nil
 }
 func (p Provider) unsettled(r state.Record) error {
 	attempts, e := p.Store.Incomplete()

@@ -48,7 +48,7 @@ func (p Provider) Delete(ctx context.Context) (result error) {
 	if e != nil {
 		return p.MarkUncertain(&r, errors.Join(compat.Fail("E_OPERATION_UNCERTAIN", "remove operation %s outcome uncertain", r.Operation.ID), e))
 	}
-	if e = sbx.CheckResult(out, r.SandboxName); e != nil {
+	if e = sbx.CheckResult(out, r.SandboxName, "removed"); e != nil {
 		return p.MarkUncertain(&r, e)
 	}
 	e = waitState(ctx, 200*time.Millisecond, func() (bool, error) { _, found, e := p.observe(ctx, r); return !found, e })

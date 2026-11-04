@@ -45,7 +45,7 @@ func (p Provider) Stop(ctx context.Context) (result error) {
 	if e != nil {
 		return p.MarkUncertain(&r, errors.Join(compat.Fail("E_OPERATION_UNCERTAIN", "stop operation %s outcome uncertain", r.Operation.ID), e))
 	}
-	if e = sbx.CheckResult(out, r.SandboxName); e != nil {
+	if e = sbx.CheckResult(out, r.SandboxName, "stopped"); e != nil {
 		return p.MarkUncertain(&r, e)
 	}
 	e = waitState(ctx, 200*time.Millisecond, func() (bool, error) {

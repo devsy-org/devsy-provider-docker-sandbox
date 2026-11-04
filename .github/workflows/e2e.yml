@@ -135,6 +135,8 @@ jobs:
               (.client_version as $client | .daemon_version as $daemon | ($profile[0].qualified_daemon_versions[$client] | index($daemon)) != null) and
               (.daemon_schema == $profile[0].daemon_schema) and
               (.operation_result_schema == $profile[0].operation_result_schema) and
+              (.shell_setting_schema == $profile[0].shell_setting_schema) and
+              (.disk_sizing_schema | length > 0) and (.disk_sizing_schema == $profile[0].disk_sizing_schemas[.host]) and
               (.docker_server_version | length > 0) and (.buildx_version | length > 0) and (.compose_version | length > 0) and
               ([.gates.client_and_daemon, .gates.inventory, .gates.ownership, .gates.mountless, .gates.detached_lifetime, .gates.byte_stream, .gates.cancellation, .gates.filesystem, .gates.docker_capabilities, .gates.daemon_ownership, .gates.network, .gates.devsy_workflow, .gates.settings_authority, .gates.sizing, .gates.concurrency_crash, .gates.native_install] | all(.[]; . == "passed"))))
           ' <<< "$NATIVE_EVIDENCE"

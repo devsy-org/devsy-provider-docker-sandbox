@@ -17,6 +17,12 @@ import (
 //go:embed profile.json
 var profileFS embed.FS
 
+const (
+	ShellSettingSchemaV0501          = "v0.50.1/effective-shell-setting"
+	OperationResultSchemaV0501       = "v0.50.1/action-resource-name"
+	DiskSizingSchemaDarwinARM64V0501 = "v0.50.1/darwin-arm64/3-percent-overhead"
+)
+
 type Profile struct {
 	MinimumDevsyVersion     string              `json:"minimum_devsy_version"`
 	QualifiedHosts          []string            `json:"qualified_hosts"`
@@ -27,6 +33,7 @@ type Profile struct {
 	InventoryStates         map[string]string   `json:"inventory_states"`
 	ShellSettingSchema      string              `json:"shell_setting_schema"`
 	OperationResultSchema   string              `json:"operation_result_schema"`
+	DiskSizingSchemas       map[string]string   `json:"disk_sizing_schemas"`
 }
 
 type Error struct {
@@ -158,16 +165,34 @@ func (p Profile) RequireInventorySchema() error {
 	return nil
 }
 func (p Profile) RequireShellSchema() error {
-	if p.ShellSettingSchema == "" {
+	if p.ShellSettingSchema != ShellSettingSchemaV0501 {
 		return Fail("E_SHELL_OVERRIDE", "effective shell shortcut settings have not been qualified")
 	}
 	return nil
 }
 func (p Profile) RequireOperationResultSchema() error {
-	return Fail("E_SBX_SCHEMA", "successful sbx stop/remove JSON has no captured v0.50.1 fixture; exact target result decoding is blocked")
+	if p.OperationResultSchema != OperationResultSchemaV0501 {
+		return Fail("E_SBX_SCHEMA", "successful sbx stop/remove JSON has no qualified result schema")
+	}
+	return nil
+}
+func MeasuredDiskSizingSchema(host, version, revision string) string {
+	if host == "darwin/arm64" && version == "v0.50.1" && revision == "ddb0268d7124b9cf98955d0b08ffd71a0dfcebe4" {
+		return DiskSizingSchemaDarwinARM64V0501
+	}
+	return ""
 }
 func (p Profile) RequireDiskSizingQualification() error {
-	return Fail("E_GUEST_CAPABILITY", "root and Docker filesystem capacity overhead have not been measured for the qualified host; provisioning is blocked")
+	host := runtime.GOOS + "/" + runtime.GOARCH
+	if len(p.QualifiedSBXVersions) != 1 {
+		return Fail("E_GUEST_CAPABILITY", "root and Docker filesystem capacity overhead is not qualified for this host")
+	}
+	version := p.QualifiedSBXVersions[0]
+	expected := MeasuredDiskSizingSchema(host, version, p.QualifiedSBXRevisions[version])
+	if expected == "" || p.DiskSizingSchemas[host] != expected {
+		return Fail("E_GUEST_CAPABILITY", "root and Docker filesystem capacity overhead is not qualified for this host")
+	}
+	return nil
 }
 func ConfigRoot() (string, error) {
 	base, err := os.UserConfigDir()

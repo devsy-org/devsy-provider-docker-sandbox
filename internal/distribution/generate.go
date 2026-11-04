@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"text/template"
+
+	"github.com/devsy-org/devsy-provider-docker-sandbox/internal/compat"
 )
 
 //go:embed provider.yaml.tmpl
@@ -36,6 +38,7 @@ type profile struct {
 	OperationResultSchema   string              `json:"operation_result_schema"`
 	InventoryStates         map[string]string   `json:"inventory_states"`
 	ShellSettingSchema      string              `json:"shell_setting_schema"`
+	DiskSizingSchemas       map[string]string   `json:"disk_sizing_schemas"`
 }
 
 type Metadata struct {
@@ -61,7 +64,7 @@ func Generate(tag, directory, profilePath string) (Metadata, error) {
 	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
 		return Metadata{}, errors.New("compatibility profile contains trailing JSON")
 	}
-	if !releaseTag.MatchString(qualified.MinimumDevsyVersion) || len(qualified.QualifiedSBXVersions) == 0 || len(qualified.QualifiedSBXRevisions) == 0 || len(qualified.QualifiedDaemonVersions) == 0 || qualified.DaemonSchema == "" || qualified.OperationResultSchema == "" || qualified.ShellSettingSchema == "" || len(qualified.InventoryStates) == 0 {
+	if !releaseTag.MatchString(qualified.MinimumDevsyVersion) || len(qualified.QualifiedSBXVersions) == 0 || len(qualified.QualifiedSBXRevisions) == 0 || len(qualified.QualifiedDaemonVersions) == 0 || qualified.DaemonSchema == "" || qualified.OperationResultSchema != compat.OperationResultSchemaV0501 || qualified.ShellSettingSchema != compat.ShellSettingSchemaV0501 || len(qualified.InventoryStates) == 0 {
 		return Metadata{}, errors.New("compatibility profile is unqualified: measured core, sbx daemon, operation results, inventory and settings evidence is required")
 	}
 	for _, version := range qualified.QualifiedSBXVersions {
@@ -108,6 +111,9 @@ func Generate(tag, directory, profilePath string) (Metadata, error) {
 	if len(qualified.QualifiedHosts) == 0 {
 		return Metadata{}, errors.New("compatibility profile contains no qualified native hosts")
 	}
+	if len(qualified.QualifiedSBXVersions) != 1 {
+		return Metadata{}, errors.New("disk sizing requires one measured sbx client version")
+	}
 	seen := make(map[string]bool, len(qualified.QualifiedHosts))
 	binaries := make([]binary, 0, len(qualified.QualifiedHosts))
 	var checksums bytes.Buffer
@@ -117,6 +123,11 @@ func Generate(tag, directory, profilePath string) (Metadata, error) {
 			return Metadata{}, fmt.Errorf("unsupported or duplicate qualified host %q", host)
 		}
 		seen[host] = true
+		version := qualified.QualifiedSBXVersions[0]
+		expected := compat.MeasuredDiskSizingSchema(host, version, qualified.QualifiedSBXRevisions[version])
+		if expected == "" || qualified.DiskSizingSchemas[host] != expected {
+			return Metadata{}, fmt.Errorf("unqualified disk sizing schema for host %q", host)
+		}
 		item.Name = "devsy-provider-docker-sandbox-" + item.OS + "-" + item.Arch
 		if item.OS == "windows" {
 			item.Name += ".exe"
@@ -127,6 +138,9 @@ func Generate(tag, directory, profilePath string) (Metadata, error) {
 		}
 		fmt.Fprintf(&checksums, "%s  %s\n", item.Checksum, item.Name)
 		binaries = append(binaries, item)
+	}
+	if len(qualified.DiskSizingSchemas) != len(qualified.QualifiedHosts) {
+		return Metadata{}, errors.New("qualified hosts require exact measured disk sizing schemas")
 	}
 	parsed, err := template.New("provider").Option("missingkey=error").Parse(manifestTemplate)
 	if err != nil {

@@ -24,6 +24,20 @@ func TestObservedUnavailableDaemonIsNotHealthy(t *testing.T) {
 		t.Fatal("unavailable daemon accepted as healthy")
 	}
 }
+func TestObservedRunningDaemonVersion(t *testing.T) {
+	var observed Version
+	if err := exact(readMeasuredFixture(t, "version-daemon-running.json"), &observed); err != nil {
+		t.Fatal(err)
+	}
+	if observed.Client.Version != "v0.50.1" || observed.Client.Revision != "ddb0268d7124b9cf98955d0b08ffd71a0dfcebe4" {
+		t.Fatalf("unexpected measured sbx client: %+v", observed.Client)
+	}
+	profile := compat.Profile{DaemonSchema: "v0.50.1/server-running", QualifiedDaemonVersions: map[string][]string{"v0.50.1": {"v0.50.1"}}}
+	if version, err := ServerVersion(observed, profile); err != nil || version != "v0.50.1" {
+		t.Fatalf("measured daemon version = %q, %v", version, err)
+	}
+}
+
 func TestObservedLoginErrorRequiresExactMatch(t *testing.T) {
 	data, e := os.ReadFile(filepath.Join("testdata", "v0.50.1", "inventory-not-signed-in.stderr"))
 	if e != nil {

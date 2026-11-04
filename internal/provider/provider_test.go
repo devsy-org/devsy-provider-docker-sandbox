@@ -90,7 +90,12 @@ func TestAcknowledgedClientNeverSettlesBackend(t *testing.T) {
 	}
 }
 
-type simulatedInventory struct{ sandbox sbx.Sandbox }
+type simulatedInventory struct {
+	sandbox    sbx.Sandbox
+	inspection *sbx.Inspection
+	inspected  *int
+	others     sbx.Inventory
+}
 
 func (b simulatedInventory) Version(context.Context) (sbx.Version, error) {
 	var version sbx.Version
@@ -100,7 +105,19 @@ func (b simulatedInventory) Version(context.Context) (sbx.Version, error) {
 	return version, nil
 }
 func (b simulatedInventory) Inventory(context.Context, compat.Profile) (sbx.Inventory, error) {
-	return sbx.Inventory{b.sandbox}, nil
+	return append(sbx.Inventory{b.sandbox}, b.others...), nil
+}
+func (b simulatedInventory) Inspect(_ context.Context, _ compat.Profile, name string) (sbx.Inspection, error) {
+	if b.inspected != nil {
+		(*b.inspected)++
+	}
+	if b.inspection != nil {
+		return *b.inspection, nil
+	}
+	if name != b.sandbox.Name {
+		return sbx.Inspection{}, errors.New("unexpected inspect")
+	}
+	return sbx.Inspection{Name: name, State: b.sandbox.State, ImageDigest: "sha256:unit-image", RuntimeMounts: []json.RawMessage{}}, nil
 }
 func (b simulatedInventory) ShellSettings(context.Context, compat.Profile) error {
 	return errors.New("unexpected settings read")
@@ -108,6 +125,84 @@ func (b simulatedInventory) ShellSettings(context.Context, compat.Profile) error
 func (b simulatedInventory) Start(context.Context, []string, []string, io.Reader, io.Writer, io.Writer) (*sbx.Process, error) {
 	return nil, errors.New("unexpected child launch")
 }
+func TestObserveInspectsOnlyMatchingOwnedSandbox(t *testing.T) {
+	p := localProvider(t)
+	p.Profile = compat.Profile{InventoryStates: map[string]string{"running": "running", "stopped": "stopped"}}
+	r, err := state.New(p.Identity, config.Spec{CPUs: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inspections := 0
+	p.Backend = simulatedInventory{sandbox: sbx.Sandbox{ID: "unrelated-id", Name: "other", State: "running"}, inspected: &inspections}
+	if _, found, err := p.observe(context.Background(), r); err != nil || found || inspections != 0 {
+		t.Fatalf("unowned inventory triggered inspection: found=%t inspections=%d error=%v", found, inspections, err)
+	}
+	p.Backend = simulatedInventory{
+		sandbox:    sbx.Sandbox{ID: "unrelated-id", Name: "other", State: "running"},
+		others:     sbx.Inventory{{ID: "owned-id", Name: r.SandboxName, State: "stopped"}},
+		inspected:  &inspections,
+		inspection: &sbx.Inspection{Name: r.SandboxName, State: "stopped", ImageDigest: "sha256:measured", RuntimeMounts: []json.RawMessage{}},
+	}
+	item, found, err := p.observe(context.Background(), r)
+	if err != nil || !found || inspections != 1 || item.ID != "owned-id" || item.Template != "sha256:measured" {
+		t.Fatalf("owned inspection = %+v found=%t inspections=%d error=%v", item, found, inspections, err)
+	}
+}
+
+func TestObserveRejectsInspectDisagreements(t *testing.T) {
+	p := localProvider(t)
+	p.Profile = compat.Profile{InventoryStates: map[string]string{"running": "running", "stopped": "stopped"}}
+	r, err := state.New(p.Identity, config.Spec{CPUs: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.SandboxID = "owned-id"
+	owned := sbx.Sandbox{ID: r.SandboxID, Name: r.SandboxName, State: "stopped"}
+	base := sbx.Inspection{Name: r.SandboxName, State: "stopped", ImageDigest: "sha256:measured", RuntimeMounts: []json.RawMessage{}}
+	cases := []struct {
+		name   string
+		mutate func(*sbx.Inspection)
+		code   string
+	}{
+		{"different name", func(s *sbx.Inspection) { s.Name = "other" }, "E_OWNERSHIP_MISMATCH"},
+		{"different optional id", func(s *sbx.Inspection) { s.ID = "other-id" }, "E_OWNERSHIP_MISMATCH"},
+		{"different state", func(s *sbx.Inspection) { s.State = "running" }, "E_SBX_STATE_UNKNOWN"},
+		{"missing digest", func(s *sbx.Inspection) { s.ImageDigest = "" }, "E_SBX_SCHEMA"},
+		{"missing mounts", func(s *sbx.Inspection) { s.RuntimeMounts = nil }, "E_SBX_SCHEMA"},
+		{"mounted sandbox", func(s *sbx.Inspection) {
+			s.RuntimeMounts = []json.RawMessage{json.RawMessage(`{"source":"/tmp/host"}`)}
+		}, "E_OWNERSHIP_MISMATCH"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			inspected := base
+			tc.mutate(&inspected)
+			p.Backend = simulatedInventory{sandbox: owned, inspection: &inspected}
+			_, found, err := p.observe(context.Background(), r)
+			if found || errorCode(err) != tc.code {
+				t.Fatalf("observe found=%t error=%v, want %s", found, err, tc.code)
+			}
+		})
+	}
+	r.Compatibility.TemplateIdentity = "sha256:other"
+	p.Backend = simulatedInventory{sandbox: owned, inspection: &base}
+	if _, found, err := p.observe(context.Background(), r); found || errorCode(err) != "E_OWNERSHIP_MISMATCH" {
+		t.Fatalf("changed template digest found=%t error=%v", found, err)
+	}
+	owned.ID = "other-id"
+	p.Backend = simulatedInventory{sandbox: owned, inspection: &base}
+	if _, found, err := p.observe(context.Background(), r); found || errorCode(err) != "E_OWNERSHIP_MISMATCH" {
+		t.Fatalf("changed inventory ID found=%t error=%v", found, err)
+	}
+	owned.ID = r.SandboxID
+	owned.Workspaces = []string{"/tmp/devsy-sbx-qualification/mount-sentinel"}
+	inspections := 0
+	p.Backend = simulatedInventory{sandbox: owned, inspected: &inspections}
+	if _, found, err := p.observe(context.Background(), r); found || errorCode(err) != "E_OWNERSHIP_MISMATCH" || inspections != 0 {
+		t.Fatalf("host-mounted sandbox found=%t inspections=%d error=%v", found, inspections, err)
+	}
+}
+
 func simulatedProfile(t *testing.T) compat.Profile {
 	t.Helper()
 	p := compat.Profile{

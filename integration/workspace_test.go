@@ -112,7 +112,7 @@ func TestNativeWorkspace(t *testing.T) {
 		}
 		id := h.createWorkspace(t, "network")
 		assertGuest(t, h, id, "test -s /tmp/devsy-sandbox-allowed-https")
-		assertGuest(t, h, id, "curl --fail --silent --show-error --max-time 30 https://example.com/ >/dev/null")
+		assertGuest(t, h, id, "curl --fail --silent --show-error --max-time 30 https://registry.npmjs.org/ >/dev/null")
 		script := "if output=$(curl --fail --silent --show-error --max-time 10 --output /dev/null -- \"$1\" 2>&1); then exit 1; else status=$?; fi; [ \"$status\" -eq \"$2\" ] && [ \"$output\" = \"$3\" ]"
 		command := exec.CommandContext(h.ctx, h.devsy, "--no-status", "workspace", "exec", id, "--", "sh", "-c", script, "sh", deniedURL, expectedCode, expectedStderr)
 		command.Env = append(os.Environ(), "DEVSY_HOME="+h.home)

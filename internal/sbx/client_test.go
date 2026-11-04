@@ -20,6 +20,7 @@ const fakeSource = `package main
 import("encoding/json";"io";"os";"time";"strings")
 func main(){if len(os.Args)<2{os.Exit(1)};switch os.Args[1]{case "version":os.Stdout.WriteString("{\"client\":{\"version\":\"v0.50.1\",\"revision\":\"observed\"},\"server\":{\"state\":\"unavailable\"}}")
 case "ls":os.Stdout.WriteString("[]")
+case "settings":if len(os.Args)!=5||os.Args[2]!="get"||os.Args[3]!="--json"||os.Args[4]!="kit.shortcuts.shell"{os.Exit(69)};if os.Getenv("SHELL_SETTING_FAIL")!=""{os.Exit(71)};if v:=os.Getenv("SHELL_SETTING_JSON");v!=""{os.Stdout.WriteString(v)}else{os.Stdout.WriteString("{\"default\":\"\",\"description\":\"shell shortcut\",\"key\":\"kit.shortcuts.shell\",\"source\":\"default\",\"type\":\"string\",\"value\":\"\"}")}
 case "exec":if os.Getenv("COMMAND")!=""||os.Getenv("DEVSY_PROVIDER_CANCEL_FILE")!=""{os.Exit(70)};switch os.Args[len(os.Args)-1]{case "byte-test":_,_=io.Copy(os.Stdout,os.Stdin);os.Stderr.Write([]byte{0,255,128,13,10});case "exit-seven":os.Exit(7);case "wait":time.Sleep(15*time.Second);default:json.NewEncoder(os.Stdout).Encode(map[string]string{"command":os.Args[len(os.Args)-1],"cwd":func()string{p,_:=os.Getwd();return p}()})}
 default:if strings.Contains(os.Args[1],"--all"){os.Exit(2)};os.Exit(1)}}`
 
