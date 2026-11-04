@@ -76,7 +76,7 @@ func (p Provider) Create(ctx context.Context) (result error) {
 	if r.Operation != nil && r.Operation.Phase == "uncertain" {
 		return compat.Fail("E_OPERATION_UNCERTAIN", "pending create %s requires backend acknowledgement", r.Operation.ID)
 	}
-	item, found, e := p.observe(ctx, r)
+	item, found, e := p.observeAllowingAttached(ctx, r)
 	if e != nil {
 		return e
 	}
@@ -115,7 +115,7 @@ func (p Provider) Create(ctx context.Context) (result error) {
 		if e != nil {
 			return p.MarkUncertain(&r, errors.Join(compat.Fail("E_CREATE_UNCERTAIN", "create outcome uncertain for machine key %s", r.MachineKey), e))
 		}
-		item, found, e = p.observe(ctx, r)
+		item, found, e = p.observeAllowingAttached(ctx, r)
 		if e != nil {
 			return p.MarkUncertain(&r, e)
 		}

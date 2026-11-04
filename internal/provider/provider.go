@@ -88,7 +88,13 @@ func (p Provider) load() (state.Record, error) {
 	return r, nil
 }
 func (p Provider) observe(ctx context.Context, r state.Record) (sbx.Sandbox, bool, error) {
-	item, found, err := p.observeSnapshot(ctx, r)
+	return p.observeWithRetry(ctx, r, false)
+}
+func (p Provider) observeAllowingAttached(ctx context.Context, r state.Record) (sbx.Sandbox, bool, error) {
+	return p.observeWithRetry(ctx, r, true)
+}
+func (p Provider) observeWithRetry(ctx context.Context, r state.Record, allowAttached bool) (sbx.Sandbox, bool, error) {
+	item, found, err := p.observeSnapshot(ctx, r, allowAttached)
 	if err == nil || ctx.Err() != nil {
 		return item, found, err
 	}
@@ -96,10 +102,10 @@ func (p Provider) observe(ctx context.Context, r state.Record) (sbx.Sandbox, boo
 	if !errors.As(err, &qualified) || (qualified.Code != "E_SBX_STATE_UNKNOWN" && qualified.Code != "E_SBX_UNAVAILABLE") {
 		return item, found, err
 	}
-	return p.observeSnapshot(ctx, r)
+	return p.observeSnapshot(ctx, r, allowAttached)
 }
 
-func (p Provider) observeSnapshot(ctx context.Context, r state.Record) (sbx.Sandbox, bool, error) {
+func (p Provider) observeSnapshot(ctx context.Context, r state.Record, allowAttached bool) (sbx.Sandbox, bool, error) {
 	items, e := p.Backend.Inventory(ctx, p.Profile)
 	if e != nil {
 		return sbx.Sandbox{}, false, e
@@ -112,7 +118,7 @@ func (p Provider) observeSnapshot(ctx context.Context, r state.Record) (sbx.Sand
 	if !qualified || (kind != "running" && kind != "stopped" && kind != "transitional" && kind != "failed") {
 		return sbx.Sandbox{}, false, compat.Fail("E_SBX_STATE_UNKNOWN", "unqualified owned sandbox state %q", item.State)
 	}
-	if kind == "running" && !item.Detached {
+	if kind == "running" && !item.Detached && !allowAttached {
 		return sbx.Sandbox{}, false, compat.Fail("E_SBX_SCHEMA", "owned running sandbox is not detached")
 	}
 	if r.SandboxID != "" && item.ID != r.SandboxID {

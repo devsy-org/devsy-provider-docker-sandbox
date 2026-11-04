@@ -14,7 +14,7 @@ func (p Provider) Command(ctx context.Context, program string, stdin io.Reader, 
 	if e := p.live(ctx, true); e != nil {
 		return e
 	}
-	admissionCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	admissionCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	var r state.Record
 	var session *state.Lock
@@ -80,7 +80,7 @@ func (p Provider) Command(ctx context.Context, program string, stdin io.Reader, 
 		if e != nil {
 			return errors.Join(e, closeLock(session), closeLock(lock))
 		}
-		proc, e := p.Backend.Start(ctx, sbx.ExecArgs(r.SandboxName, program), nil, stdin, stdout, stderr)
+		proc, e := p.Backend.Start(ctx, sbx.SessionExecArgs(r.SandboxName, program, attemptID), nil, stdin, stdout, stderr)
 		if e != nil {
 			a.Phase = "client_reaped"
 			a.Outcome = "start_failed"
@@ -146,9 +146,9 @@ func (p Provider) Command(ctx context.Context, program string, stdin io.Reader, 
 		case interrupted = <-watchErr:
 		default:
 		}
-		now = time.Now().UTC()
+		completed := time.Now().UTC()
 		a.Phase = "client_reaped"
-		a.CompletedAt = &now
+		a.CompletedAt = &completed
 		a.Outcome = "normal_exit"
 		if interrupted != nil {
 			a.Outcome = "interrupted"
@@ -164,12 +164,29 @@ func (p Provider) Command(ctx context.Context, program string, stdin io.Reader, 
 		if saveErr = p.Store.SaveAttempt(a); saveErr != nil {
 			return errors.Join(e, saveErr)
 		}
+		var terminateErr error
+		if interrupted == nil && cancelled {
+			terminateErr = p.terminateGuestSession(r.SandboxName, attemptID)
+		}
 		if interrupted != nil {
 			return interrupted
 		}
 		if ctx.Err() != nil {
-			return ctx.Err()
+			return errors.Join(ctx.Err(), terminateErr)
 		}
-		return e
+		return errors.Join(e, terminateErr)
 	}
+}
+
+func (p Provider) terminateGuestSession(name, session string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	defer cancel()
+	proc, e := p.Backend.Start(ctx, sbx.TerminateSessionArgs(name, session), nil, nil, io.Discard, io.Discard)
+	if e != nil {
+		return compat.Fail("E_SESSION_UNTERMINATED", "guest session %s may still be running: %v", session, e)
+	}
+	if e = proc.Wait(ctx); e != nil {
+		return compat.Fail("E_SESSION_UNTERMINATED", "guest session %s may still be running: %v", session, e)
+	}
+	return nil
 }

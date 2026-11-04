@@ -5,6 +5,7 @@ package integration
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -13,7 +14,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -69,7 +69,7 @@ func TestNativeWorkspace(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := &nativeHarness{devsy: devsy, home: filepath.Join(root, "devsy-home"), alias: "sandbox-native", root: root, ctx: ctx}
-	h.run(t, nil, "provider", "add", "--use=false", "--name", h.alias, manifestPath)
+	h.run(t, nil, "provider", "add", "--use=false", "--name", h.alias, "-o", "SBX_PATH="+sbx, manifestPath)
 	h.run(t, nil, "provider", "init", h.alias)
 	image := h.createWorkspace(t, "image")
 	t.Run("image hooks and source persistence", func(t *testing.T) {
@@ -100,26 +100,75 @@ func TestNativeWorkspace(t *testing.T) {
 	})
 	t.Run("allowed build and denied runtime network", func(t *testing.T) {
 		deniedURL := requiredEnv(t, "SBX_NATIVE_DENIED_URL")
-		expectedCode := requiredEnv(t, "SBX_NATIVE_DENIED_CURL_EXIT_CODE")
-		expectedStderr := requiredEnv(t, "SBX_NATIVE_DENIED_CURL_STDERR")
-		code, err := strconv.Atoi(expectedCode)
-		if err != nil || code < 1 || code > 255 {
-			t.Fatal("native denied-network curl exit status must be a number from 1 to 255")
-		}
-		switch code {
-		case 5, 6, 7, 28, 35, 51, 52, 55, 56, 60:
-			t.Fatal("generic curl network failure cannot establish policy denial")
-		}
+		before := sandboxNames(t, h.ctx, sbx)
 		id := h.createWorkspace(t, "network")
+		created := newSandboxName(t, before, sandboxNames(t, h.ctx, sbx))
 		assertGuest(t, h, id, "test -s /tmp/devsy-sandbox-allowed-https")
 		assertGuest(t, h, id, "curl --fail --silent --show-error --max-time 30 https://registry.npmjs.org/ >/dev/null")
-		script := "if output=$(curl --fail --silent --show-error --max-time 10 --output /dev/null -- \"$1\" 2>&1); then exit 1; else status=$?; fi; [ \"$status\" -eq \"$2\" ] && [ \"$output\" = \"$3\" ]"
-		command := exec.CommandContext(h.ctx, h.devsy, "--no-status", "workspace", "exec", id, "--", "sh", "-c", script, "sh", deniedURL, expectedCode, expectedStderr)
+		command := exec.CommandContext(h.ctx, h.devsy, "--no-status", "workspace", "exec", id, "--", "sh", "-c", "if curl --fail --silent --max-time 10 --output /dev/null -- \"$1\" >/dev/null 2>&1; then exit 1; fi", "sh", deniedURL)
 		command.Env = append(os.Environ(), "DEVSY_HOME="+h.home)
-		if _, err := command.CombinedOutput(); err != nil {
-			t.Fatalf("runtime network denial did not match configured curl exit status and stderr: %v", err)
+		if output, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("guest reached the denied destination: %v: %s", err, output)
+		}
+		if decision := policyDecision(t, h.ctx, sbx, created, deniedURL); decision.Allowed || decision.DenyKind == "" {
+			t.Fatalf("sbx policy does not deny %s for the sandbox: %+v", deniedURL, decision)
+		}
+		if decision := policyDecision(t, h.ctx, sbx, created, "https://registry.npmjs.org/"); !decision.Allowed {
+			t.Fatalf("sbx policy does not allow the build destination: %+v", decision)
 		}
 	})
+}
+
+type networkDecision struct {
+	Allowed  bool   `json:"allowed"`
+	DenyKind string `json:"deny_kind"`
+}
+
+func policyDecision(t *testing.T, ctx context.Context, sbx, sandbox, url string) networkDecision {
+	t.Helper()
+	output, err := exec.CommandContext(ctx, sbx, "policy", "check", "network", "--sandbox", sandbox, "--json", url).Output()
+	var exit *exec.ExitError
+	if err != nil && !errors.As(err, &exit) {
+		t.Fatalf("sbx policy check for %s failed: %v", url, err)
+	}
+	var decision networkDecision
+	if err := json.Unmarshal(output, &decision); err != nil {
+		t.Fatalf("sbx policy check for %s returned unreadable output: %v: %s", url, err, output)
+	}
+	return decision
+}
+
+func sandboxNames(t *testing.T, ctx context.Context, sbx string) map[string]bool {
+	t.Helper()
+	output, err := exec.CommandContext(ctx, sbx, "ls", "--format", "json").Output()
+	if err != nil {
+		t.Fatalf("sbx inventory failed: %v", err)
+	}
+	var items []struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(output, &items); err != nil {
+		t.Fatalf("unreadable sbx inventory: %v", err)
+	}
+	names := make(map[string]bool, len(items))
+	for _, item := range items {
+		names[item.Name] = true
+	}
+	return names
+}
+
+func newSandboxName(t *testing.T, before, after map[string]bool) string {
+	t.Helper()
+	var created []string
+	for name := range after {
+		if !before[name] {
+			created = append(created, name)
+		}
+	}
+	if len(created) != 1 {
+		t.Fatalf("workspace creation added %d sandboxes, want 1", len(created))
+	}
+	return created[0]
 }
 
 func (h *nativeHarness) createWorkspace(t *testing.T, fixture string) string {

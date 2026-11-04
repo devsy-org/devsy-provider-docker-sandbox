@@ -166,7 +166,10 @@ func main() {
 		return
 	}
 	if errors.Is(e, context.Canceled) {
-		fmt.Fprintln(os.Stderr, e)
+		var tagged *compat.Error
+		if errors.As(e, &tagged) {
+			fmt.Fprintln(os.Stderr, e)
+		}
 		os.Exit(130)
 	}
 	if errors.Is(e, context.DeadlineExceeded) {

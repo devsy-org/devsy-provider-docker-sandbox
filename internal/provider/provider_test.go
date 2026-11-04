@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"testing"
 	"time"
 )
@@ -294,6 +295,31 @@ func TestObserveRejectsUnqualifiedOwnedStateAndAttachedMode(t *testing.T) {
 				t.Fatalf("owned sandbox admission found=%t inspections=%d error=%v", found, inspections, err)
 			}
 		})
+	}
+}
+
+func TestObserveAllowingAttachedAcceptsFreshlyCreatedRunningSandbox(t *testing.T) {
+	p := localProvider(t)
+	p.Profile = compat.Profile{InventoryStates: map[string]string{"running": "running", "stopped": "stopped"}}
+	r, err := state.New(p.Identity, config.Spec{CPUs: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.SandboxID = "owned-id"
+	owned := sbx.Sandbox{ID: r.SandboxID, Name: r.SandboxName, State: "running"}
+	inspection := sbx.Inspection{Name: r.SandboxName, State: "running", ImageDigest: "sha256:measured", RuntimeMounts: []json.RawMessage{}}
+	p.Backend = simulatedInventory{sandbox: owned, inspection: &inspection}
+	if _, found, err := p.observe(context.Background(), r); found || errorCode(err) != "E_SBX_SCHEMA" {
+		t.Fatalf("strict observation found=%t error=%v", found, err)
+	}
+	item, found, err := p.observeAllowingAttached(context.Background(), r)
+	if err != nil || !found || item.ID != r.SandboxID {
+		t.Fatalf("attached-tolerant observation = %+v found=%t error=%v", item, found, err)
+	}
+	owned.ID = "other-id"
+	p.Backend = simulatedInventory{sandbox: owned, inspection: &inspection}
+	if _, found, err := p.observeAllowingAttached(context.Background(), r); found || errorCode(err) != "E_OWNERSHIP_MISMATCH" {
+		t.Fatalf("attached-tolerant observation accepted a different ID: found=%t error=%v", found, err)
 	}
 }
 
@@ -651,10 +677,18 @@ type simulatedCommandBackend struct {
 	simulatedInventory
 	executable string
 	store      state.Store
+	started    *[][]string
 }
 
-func (b simulatedCommandBackend) Start(ctx context.Context, _ []string, _ []string, stdin io.Reader, stdout, stderr io.Writer) (*sbx.Process, error) {
-	return (sbx.Client{Path: b.executable, Store: b.store}).Start(ctx, []string{"-test.run=^TestCommandChildHelper$"}, nil, stdin, stdout, stderr)
+func (b simulatedCommandBackend) Start(ctx context.Context, args []string, _ []string, stdin io.Reader, stdout, stderr io.Writer) (*sbx.Process, error) {
+	var extra []string
+	if b.started != nil {
+		*b.started = append(*b.started, args)
+	}
+	if !slices.Contains(args, "--interactive") {
+		extra = []string{"PROVIDER_COMMAND_TEST_CHILD=terminated"}
+	}
+	return (sbx.Client{Path: b.executable, Store: b.store}).Start(ctx, []string{"-test.run=^TestCommandChildHelper$"}, extra, stdin, stdout, stderr)
 }
 
 func TestCommandChildHelper(t *testing.T) {
@@ -664,6 +698,9 @@ func TestCommandChildHelper(t *testing.T) {
 	}
 	if _, err := os.Stdout.Write([]byte("ready")); err != nil {
 		os.Exit(2)
+	}
+	if mode == "terminated" {
+		os.Exit(0)
 	}
 	if mode == "exit" {
 		os.Exit(7)
@@ -711,10 +748,12 @@ func TestCommandAttemptOutcomes(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			var started [][]string
 			p.Backend = simulatedCommandBackend{
 				simulatedInventory: simulatedInventory{sandbox: sbx.Sandbox{ID: r.SandboxID, Name: r.SandboxName, State: "unit-running", Detached: true}},
 				executable:         executable,
 				store:              p.Store,
+				started:            &started,
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
@@ -771,6 +810,14 @@ func TestCommandAttemptOutcomes(t *testing.T) {
 			}
 			if tc.outcome == "normal_exit" && (attempts[0].ExitCode == nil || *attempts[0].ExitCode != 7) {
 				t.Fatalf("normal command exit code = %+v", attempts[0].ExitCode)
+			}
+			session := sbx.SessionEnv + "=" + attempts[0].AttemptID
+			if len(started) == 0 || !slices.Contains(started[0], session) {
+				t.Fatalf("guest command was not tagged with its attempt: %v", started)
+			}
+			terminated := len(started) == 2 && slices.Contains(started[1], attempts[0].AttemptID) && !slices.Contains(started[1], "--interactive")
+			if terminated != (tc.outcome == "cancelled") || (!terminated && len(started) != 1) {
+				t.Fatalf("guest termination for outcome %s = %v", tc.outcome, started)
 			}
 		})
 	}

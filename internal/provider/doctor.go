@@ -35,7 +35,7 @@ func (p Provider) Doctor(ctx context.Context) ([]byte, error) {
 	}
 	out.Attempts = a
 	if out.Record != nil && p.Backend != nil && p.Config.SBXPath != "" {
-		if item, found, e := p.observe(ctx, r); e != nil {
+		if item, found, e := p.observeAllowingAttached(ctx, r); e != nil {
 			out.BackendError = e.Error()
 		} else if found {
 			out.Backend = &item

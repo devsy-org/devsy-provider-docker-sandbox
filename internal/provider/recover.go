@@ -112,7 +112,7 @@ func (p Provider) RecoverOperation(ctx context.Context, id string) (result error
 	if len(attempts) > 0 {
 		return compat.Fail("E_UNCLEAN_ATTEMPT", "reconcile child attempts before backend acknowledgement")
 	}
-	item, found, e := p.observe(ctx, r)
+	item, found, e := p.observeAllowingAttached(ctx, r)
 	if e != nil {
 		return e
 	}

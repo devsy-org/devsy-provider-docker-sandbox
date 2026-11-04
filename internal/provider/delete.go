@@ -34,7 +34,7 @@ func (p Provider) Delete(ctx context.Context) (result error) {
 		return e
 	}
 	defer func() { result = errors.Join(result, closeLock(sessions)) }()
-	_, found, e := p.observe(ctx, r)
+	_, found, e := p.observeAllowingAttached(ctx, r)
 	if e != nil {
 		return p.failWithStep(&r, e)
 	}
@@ -51,7 +51,7 @@ func (p Provider) Delete(ctx context.Context) (result error) {
 	if e = sbx.CheckResult(out, r.SandboxName, "removed"); e != nil {
 		return p.MarkUncertain(&r, e)
 	}
-	e = waitState(ctx, 200*time.Millisecond, func() (bool, error) { _, found, e := p.observe(ctx, r); return !found, e })
+	e = waitState(ctx, 200*time.Millisecond, func() (bool, error) { _, found, e := p.observeAllowingAttached(ctx, r); return !found, e })
 	if e != nil {
 		return p.MarkUncertain(&r, e)
 	}

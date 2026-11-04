@@ -99,8 +99,8 @@ func (p Provider) attempt(ctx context.Context, r *state.Record, kind string, arg
 	if errorCode(e) == "E_UNCLEAN_ATTEMPT" {
 		return e
 	}
-	now = time.Now().UTC()
-	a.CompletedAt = &now
+	completed := time.Now().UTC()
+	a.CompletedAt = &completed
 	a.Phase = "client_reaped"
 	if childCtx.Err() != nil {
 		a.Outcome = "cancelled"

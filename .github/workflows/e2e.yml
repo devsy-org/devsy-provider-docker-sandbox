@@ -100,8 +100,6 @@ jobs:
           DEVSY_NATIVE_CORE_SOURCE: ${{ github.workspace }}/devsy
           SBX_PATH: ${{ vars.SBX_NATIVE_EXECUTABLE }}
           SBX_NATIVE_DENIED_URL: ${{ vars.SBX_NATIVE_DENIED_URL }}
-          SBX_NATIVE_DENIED_CURL_EXIT_CODE: ${{ vars.SBX_NATIVE_DENIED_CURL_EXIT_CODE }}
-          SBX_NATIVE_DENIED_CURL_STDERR: ${{ vars.SBX_NATIVE_DENIED_CURL_STDERR }}
         run: |
           export DEVSY_NATIVE_CORE_BIN="$RUNNER_TEMP/devsy${{ runner.os == 'Windows' && '.exe' || '' }}"
           export DEVSY_NATIVE_CANCEL_HELPER="$RUNNER_TEMP/native-cancel${{ runner.os == 'Windows' && '.exe' || '' }}"

@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/devsy-org/devsy/cmd"
 	"github.com/devsy-org/devsy/pkg/client/clientimplementation"
 	"github.com/devsy-org/devsy/pkg/config"
 	"github.com/devsy-org/devsy/pkg/provider"
@@ -17,6 +18,10 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "internal" {
+		cmd.Execute()
+		return
+	}
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
