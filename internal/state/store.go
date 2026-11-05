@@ -185,12 +185,7 @@ func readFile(path string) ([]byte, error) {
 	if e := checkStateFile(path, fi); e != nil {
 		return nil, e
 	}
-	root, e := os.OpenRoot(filepath.Dir(path))
-	if e != nil {
-		return nil, e
-	}
-	defer func() { _ = root.Close() }()
-	file, e := root.Open(filepath.Base(path))
+	file, e := openStateReadFile(path)
 	if e != nil {
 		return nil, e
 	}
@@ -309,7 +304,7 @@ func (s Store) SaveAttempt(a Attempt) error {
 }
 
 func (s Store) Attempts() ([]Attempt, error) {
-	entries, e := os.ReadDir(filepath.Join(s.Dir(), "attempts"))
+	entries, e := readStateDir(filepath.Join(s.Dir(), "attempts"))
 	if os.IsNotExist(e) {
 		return nil, nil
 	}
@@ -366,7 +361,7 @@ func (s Store) ControlCWD() (string, func() error, error) {
 }
 
 func (s Store) ListKeys() ([]string, error) {
-	entries, e := os.ReadDir(s.Root)
+	entries, e := readStateDir(s.Root)
 	if os.IsNotExist(e) {
 		return nil, nil
 	}

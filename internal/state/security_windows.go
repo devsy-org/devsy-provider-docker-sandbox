@@ -1,10 +1,12 @@
 package state
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -21,6 +23,11 @@ func stateSecurity() (*windows.SECURITY_DESCRIPTOR, error) {
 }
 
 func makeStateDir(path string) error {
+	release, err := holdStateParents(path)
+	if err != nil {
+		return err
+	}
+	defer release()
 	sd, err := stateSecurity()
 	if err != nil {
 		return err
@@ -59,45 +66,148 @@ func openStateFile(path string, disposition uint32) (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	name, err := windows.UTF16PtrFromString(path)
-	if err != nil {
-		return nil, err
-	}
-	handle, err := windows.CreateFile(
-		name,
+
+	handle, err := openCheckedWindowsPath(
+		path,
 		windows.GENERIC_READ|windows.GENERIC_WRITE|windows.READ_CONTROL,
-		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE,
-		&windows.SecurityAttributes{
-			Length:             uint32(unsafe.Sizeof(windows.SecurityAttributes{})),
-			SecurityDescriptor: sd,
-		},
 		disposition,
-		windows.FILE_ATTRIBUTE_NORMAL|windows.FILE_FLAG_OPEN_REPARSE_POINT,
-		0,
+		sd,
 	)
 	if err != nil {
 		return nil, err
 	}
-	file := os.NewFile(uintptr(handle), path)
+	return windowsStateFile(handle, path, false)
+}
+
+func checkWindowsPath(path string) error {
+	handle, err := openCheckedWindowsPath(path, windows.READ_CONTROL, windows.OPEN_EXISTING, nil)
+	if err != nil {
+		return err
+	}
+	return windows.CloseHandle(handle)
+}
+
+func openCheckedWindowsPath(
+	path string,
+	access, disposition uint32,
+	sd *windows.SECURITY_DESCRIPTOR,
+) (windows.Handle, error) {
+	release, err := holdStateParents(path)
+	if err != nil {
+		return windows.InvalidHandle, err
+	}
+	defer release()
+	return openWindowsHandle(path, access, disposition, sd)
+}
+
+func openWindowsHandle(
+	path string,
+	access, disposition uint32,
+	sd *windows.SECURITY_DESCRIPTOR,
+) (windows.Handle, error) {
+	name, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return windows.InvalidHandle, err
+	}
+	var attributes *windows.SecurityAttributes
+	if sd != nil {
+		attributes = &windows.SecurityAttributes{
+			Length:             uint32(unsafe.Sizeof(windows.SecurityAttributes{})),
+			SecurityDescriptor: sd,
+		}
+	}
+	handle, err := windows.CreateFile(
+		name,
+		access,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE,
+		attributes,
+		disposition,
+		windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OPEN_REPARSE_POINT,
+		0,
+	)
+	if err != nil {
+		return windows.InvalidHandle, err
+	}
 	if err := checkWindowsHandle(handle); err != nil {
+		return windows.InvalidHandle, errors.Join(err, windows.CloseHandle(handle))
+	}
+	return handle, nil
+}
+
+func holdStateParents(path string) (func(), error) {
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+	var parents []string
+	for parent := filepath.Dir(absolute); ownedStatePath(parent); parent = filepath.Dir(parent) {
+		parents = append(parents, parent)
+	}
+	var files []*os.File
+	release := func() {
+		for _, file := range files {
+			_ = file.Close()
+		}
+	}
+	for _, parent := range slices.Backward(parents) {
+		handle, err := openWindowsHandle(parent, windows.READ_CONTROL, windows.OPEN_EXISTING, nil)
+		if err != nil {
+			release()
+			return nil, err
+		}
+		file, err := windowsStateFile(handle, parent, true)
+		if err != nil {
+			release()
+			return nil, err
+		}
+		files = append(files, file)
+	}
+	return release, nil
+}
+
+func windowsStateFile(handle windows.Handle, path string, directory bool) (*os.File, error) {
+	file := os.NewFile(uintptr(handle), path)
+	info, err := file.Stat()
+	if err == nil && (info.IsDir() != directory || (!directory && !info.Mode().IsRegular())) {
+		err = errors.New("unexpected state object type")
+	}
+	if err != nil {
 		return nil, errors.Join(err, file.Close())
 	}
 	return file, nil
 }
 
-func checkWindowsPath(path string) error {
-	name, err := windows.UTF16PtrFromString(path)
+func openStateReadFile(path string) (*os.File, error) {
+	handle, err := openCheckedWindowsPath(
+		path,
+		windows.GENERIC_READ|windows.READ_CONTROL,
+		windows.OPEN_EXISTING,
+		nil,
+	)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	handle, err := windows.CreateFile(name, windows.READ_CONTROL,
-		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE, nil, windows.OPEN_EXISTING,
-		windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
+	return windowsStateFile(handle, path, false)
+}
+
+func readStateDir(path string) ([]os.DirEntry, error) {
+	handle, err := openCheckedWindowsPath(
+		path,
+		windows.GENERIC_READ|windows.READ_CONTROL,
+		windows.OPEN_EXISTING,
+		nil,
+	)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	defer func() { _ = windows.CloseHandle(handle) }()
-	return checkWindowsHandle(handle)
+	file, err := windowsStateFile(handle, path, true)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = file.Close() }()
+	entries, err := file.ReadDir(-1)
+	slices.SortFunc(entries, func(a, b os.DirEntry) int { return cmp.Compare(a.Name(), b.Name()) })
+	return entries, err
 }
 
 func checkWindowsHandle(handle windows.Handle) error {

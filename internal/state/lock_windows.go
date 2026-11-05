@@ -27,6 +27,11 @@ func checkFile(path string, fi os.FileInfo) error {
 }
 
 func replaceFile(src, dst string) error {
+	release, err := holdStateParents(dst)
+	if err != nil {
+		return err
+	}
+	defer release()
 	a, err := windows.UTF16PtrFromString(src)
 	if err != nil {
 		return err

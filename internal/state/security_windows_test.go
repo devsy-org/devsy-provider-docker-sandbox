@@ -3,6 +3,7 @@ package state
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -113,5 +114,69 @@ func TestWindowsRejectStateSymlinks(t *testing.T) {
 		if err := checkWindowsPath(path); err == nil {
 			t.Fatal("reparse point accepted")
 		}
+	}
+}
+
+func TestWindowsRejectStateJunction(t *testing.T) {
+	s := windowsStore(t)
+	target := filepath.Join(s.Dir(), "target")
+	requireNoError(t, makeStateDir(target))
+	file, err := createStateTemp(target)
+	requireNoError(t, err)
+	name := filepath.Base(file.Name())
+	requireNoError(t, file.Close())
+	junction := filepath.Join(s.Dir(), "junction")
+	output, err := exec.Command("cmd.exe", "/d", "/c", "mklink", "/J", junction, target).
+		CombinedOutput()
+	if err != nil {
+		t.Skipf("runner cannot create a junction: %v: %s", err, output)
+	}
+	t.Cleanup(func() {
+		if err := os.Remove(junction); err != nil {
+			t.Error(err)
+		}
+	})
+	if err := checkWindowsPath(junction); err == nil {
+		t.Fatal("junction passed state validation")
+	}
+	if file, err := openStateReadFile(junction); err == nil {
+		_ = file.Close()
+		t.Fatal("junction opened as a file")
+	}
+	if _, err := readStateDir(junction); err == nil {
+		t.Fatal("junction directory was enumerated")
+	}
+	if file, err := openStateReadFile(filepath.Join(junction, name)); err == nil {
+		_ = file.Close()
+		t.Fatal("read traversed a junction ancestor")
+	}
+	if file, err := openStateFile(
+		filepath.Join(junction, "mutation.lock"),
+		windows.OPEN_ALWAYS,
+	); err == nil {
+		_ = file.Close()
+		t.Fatal("write traversed a junction ancestor")
+	}
+}
+
+func TestWindowsReadRejectsSwappedSymlink(t *testing.T) {
+	s := windowsStore(t)
+	original, err := createStateTemp(s.Dir())
+	requireNoError(t, err)
+	path := original.Name()
+	requireNoError(t, original.Close())
+	target, err := createStateTemp(s.Dir())
+	requireNoError(t, err)
+	requireNoError(t, target.Close())
+	info, err := os.Lstat(path)
+	requireNoError(t, err)
+	requireNoError(t, checkStateFile(path, info))
+	requireNoError(t, os.Remove(path))
+	if err := os.Symlink(target.Name(), path); err != nil {
+		t.Skipf("runner cannot create symlinks: %v", err)
+	}
+	if file, err := openStateReadFile(path); err == nil {
+		_ = file.Close()
+		t.Fatal("read followed a symlink after path validation")
 	}
 }

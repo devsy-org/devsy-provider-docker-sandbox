@@ -130,3 +130,14 @@ func createStateTemp(dir string) (*os.File, error) { return os.CreateTemp(dir, "
 
 func checkOpenedStateFile(file *os.File, fi os.FileInfo) error { return checkFile(file.Name(), fi) }
 func createStateTempDir(dir string) (string, error)            { return os.MkdirTemp(dir, "call-") }
+
+func openStateReadFile(path string) (*os.File, error) {
+	root, err := os.OpenRoot(filepath.Dir(path))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = root.Close() }()
+	return root.Open(filepath.Base(path))
+}
+
+func readStateDir(path string) ([]os.DirEntry, error) { return os.ReadDir(path) }

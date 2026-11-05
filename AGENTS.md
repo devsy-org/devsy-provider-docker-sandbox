@@ -37,3 +37,5 @@ Use signed Conventional Commits. Pull requests require applicable CI and complet
 Write documentation in proper English without dashes joining sentences. Do not put tracker identifiers in repository content.
 
 Windows state directories and files use an explicit protected DACL at creation, granting full control only to the current process user, SYSTEM and BUILTIN\Administrators. Existing state must have no allow entries for other principals. Reparse points and symlinks are rejected. The owner must be the process token user. BUILTIN\Administrators is also accepted when the process is elevated and the token default owner is BUILTIN\Administrators.
+
+Windows opens state files and directories with reparse point traversal disabled, then validates the opened handle before use. Provider state ancestors are held open without delete sharing during path operations so they cannot be swapped for junctions. The pinned x/sys GetSecurityInfo wrapper frees its native security descriptor and returns a copy managed by Go.
