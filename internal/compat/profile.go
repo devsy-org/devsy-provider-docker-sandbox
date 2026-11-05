@@ -85,10 +85,20 @@ func (p Profile) SBX(version, revision string) error {
 	}
 	return Fail("E_SBX_VERSION", "sbx %q revision %q has no qualified profile", version, revision)
 }
-func parseSemver(s string) ([3]uint64, error) {
-	var out [3]uint64
+
+type semver struct {
+	core [3]uint64
+	pre  []string
+}
+
+func parseSemver(s string) (semver, error) {
+	var out semver
 	s = strings.TrimPrefix(strings.TrimSpace(s), "v")
-	parts := strings.Split(s, ".")
+	if strings.Contains(s, "+") {
+		return out, fmt.Errorf("build metadata is not accepted in a Devsy version")
+	}
+	number, pre, hasPre := strings.Cut(s, "-")
+	parts := strings.Split(number, ".")
 	if len(parts) != 3 {
 		return out, fmt.Errorf("expected one semantic version")
 	}
@@ -100,9 +110,88 @@ func parseSemver(s string) ([3]uint64, error) {
 		if err != nil {
 			return out, err
 		}
-		out[i] = n
+		out.core[i] = n
+	}
+	if !hasPre {
+		return out, nil
+	}
+	out.pre = strings.Split(pre, ".")
+	for _, id := range out.pre {
+		if !validPrereleaseIdentifier(id) {
+			return semver{}, fmt.Errorf("invalid semantic version prerelease")
+		}
 	}
 	return out, nil
+}
+
+func validPrereleaseIdentifier(id string) bool {
+	if id == "" {
+		return false
+	}
+	numeric := true
+	for _, c := range id {
+		switch {
+		case c >= '0' && c <= '9':
+		case (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '-':
+			numeric = false
+		default:
+			return false
+		}
+	}
+	return !numeric || id == "0" || id[0] != '0'
+}
+
+func compareSemver(a, b semver) int {
+	for i := range a.core {
+		if a.core[i] != b.core[i] {
+			if a.core[i] < b.core[i] {
+				return -1
+			}
+			return 1
+		}
+	}
+	if len(a.pre) == 0 || len(b.pre) == 0 {
+		switch {
+		case len(a.pre) == len(b.pre):
+			return 0
+		case len(a.pre) == 0:
+			return 1
+		default:
+			return -1
+		}
+	}
+	for i := 0; i < len(a.pre) && i < len(b.pre); i++ {
+		if c := comparePrereleaseIdentifier(a.pre[i], b.pre[i]); c != 0 {
+			return c
+		}
+	}
+	switch {
+	case len(a.pre) < len(b.pre):
+		return -1
+	case len(a.pre) > len(b.pre):
+		return 1
+	}
+	return 0
+}
+
+func comparePrereleaseIdentifier(a, b string) int {
+	an, aErr := strconv.ParseUint(a, 10, 64)
+	bn, bErr := strconv.ParseUint(b, 10, 64)
+	switch {
+	case aErr == nil && bErr == nil:
+		if an < bn {
+			return -1
+		}
+		if an > bn {
+			return 1
+		}
+		return 0
+	case aErr == nil:
+		return -1
+	case bErr == nil:
+		return 1
+	}
+	return strings.Compare(a, b)
 }
 func HostEnvironment() []string {
 	inherited := os.Environ()
@@ -139,16 +228,11 @@ func (p Profile) Devsy(ctx context.Context, path string) error {
 	if err != nil {
 		return Wrap("E_DEVSY_VERSION", err)
 	}
-	if version == [3]uint64{} {
+	if version.core == [3]uint64{} {
 		return Fail("E_DEVSY_VERSION", "development Devsy v0.0.0 is not a qualified release")
 	}
-	for i := range version {
-		if version[i] < minimum[i] {
-			return Fail("E_DEVSY_VERSION", "Devsy %s is older than required %s", strings.TrimSpace(string(out)), p.MinimumDevsyVersion)
-		}
-		if version[i] > minimum[i] {
-			break
-		}
+	if compareSemver(version, minimum) < 0 {
+		return Fail("E_DEVSY_VERSION", "Devsy %s is older than required %s", strings.TrimSpace(string(out)), p.MinimumDevsyVersion)
 	}
 	return nil
 }

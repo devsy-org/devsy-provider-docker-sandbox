@@ -40,10 +40,10 @@ jobs:
           tag_object="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$VERSION" --jq .object.sha)"
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag_object" --jq '.verification.verified')" = true
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$GITHUB_SHA" --jq '.verification.verified')" = true
-          [[ "$CORE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$CORE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$ ]]
           minimum="$(jq -r .minimum_devsy_version internal/compat/profile.json)"
-          printf '%s\n' "$minimum" "$CORE_TAG" | sort -V -C
-          test "$(gh api "repos/devsy-org/devsy/releases/tags/$CORE_TAG" --jq '.draft == false and .prerelease == false')" = true
+          printf '%s\n' "${minimum//-/\~}" "${CORE_TAG//-/\~}" | sort -V -C
+          test "$(gh api "repos/devsy-org/devsy/releases/tags/$CORE_TAG" --jq '.draft == false')" = true
           core_object="$(gh api "repos/devsy-org/devsy/git/ref/tags/$CORE_TAG" --jq .object.sha)"
           core_type="$(gh api "repos/devsy-org/devsy/git/ref/tags/$CORE_TAG" --jq .object.type)"
           if [[ "$core_type" == tag ]]; then
@@ -111,4 +111,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ inputs.version }}
-        run: gh release create "$VERSION" dist/* --verify-tag --title "$VERSION" --notes-file dist/RELEASE_NOTES.txt
+          CORE_TAG: ${{ inputs.core_tag }}
+        run: |
+          flags=()
+          if [[ "$CORE_TAG" == *-* ]]; then flags+=(--prerelease); fi
+          gh release create "$VERSION" dist/* --verify-tag --title "$VERSION" --notes-file dist/RELEASE_NOTES.txt "${flags[@]}"

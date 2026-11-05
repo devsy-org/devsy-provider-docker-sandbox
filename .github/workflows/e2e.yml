@@ -87,7 +87,7 @@ jobs:
         env:
           CORE_TAG: ${{ inputs.core_tag }}
         run: |
-          [[ "$CORE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$CORE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$ ]]
           go build -ldflags "-X github.com/devsy-org/devsy/pkg/version.version=$CORE_TAG" -o "$RUNNER_TEMP/devsy${{ runner.os == 'Windows' && '.exe' || '' }}" .
           test "$("$RUNNER_TEMP/devsy${{ runner.os == 'Windows' && '.exe' || '' }}" --version)" = "$CORE_TAG"
           go build -o "$RUNNER_TEMP/native-cancel${{ runner.os == 'Windows' && '.exe' || '' }}" ../provider/integration/native_cancel.go
