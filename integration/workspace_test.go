@@ -69,7 +69,8 @@ func TestNativeWorkspace(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := &nativeHarness{devsy: devsy, home: filepath.Join(root, "devsy-home"), alias: "sandbox-native", root: root, ctx: ctx}
-	h.run(t, nil, "provider", "add", "--use=false", "--name", h.alias, "-o", "SBX_PATH="+sbx, manifestPath)
+	h.run(t, nil, "provider", "add", "--use=false", "--name", h.alias, manifestPath)
+	h.run(t, nil, "provider", "set", h.alias, "-o", "SBX_PATH="+sbx)
 	h.run(t, nil, "provider", "init", h.alias)
 	image := h.createWorkspace(t, "image")
 	t.Run("image hooks and source persistence", func(t *testing.T) {
