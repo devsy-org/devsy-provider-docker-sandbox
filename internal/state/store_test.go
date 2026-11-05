@@ -99,7 +99,7 @@ func interruptedAttempts(t *testing.T) (Store, Attempt) {
 	if err := s.SaveAttempt(a); err != nil {
 		t.Fatal(err)
 	}
-	temp, err := os.CreateTemp(filepath.Join(s.Dir(), "attempts"), ".atomic-")
+	temp, err := createStateTemp(filepath.Join(s.Dir(), "attempts"))
 	requireNoError(t, err)
 	if err := temp.Close(); err != nil {
 		t.Fatal(err)

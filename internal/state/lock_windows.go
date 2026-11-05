@@ -5,124 +5,99 @@ package state
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
-	"os/exec"
-	"os/user"
-	"syscall"
 	"time"
-	"unsafe"
 
-	"github.com/devsy-org/devsy-provider-docker-sandbox/internal/compat"
+	"golang.org/x/sys/windows"
 )
 
-var (
-	kernel32   = syscall.NewLazyDLL("kernel32.dll")
-	lockFile   = kernel32.NewProc("LockFileEx")
-	unlockFile = kernel32.NewProc("UnlockFileEx")
-	moveFile   = kernel32.NewProc("MoveFileExW")
-)
-
-type overlapped struct {
-	Internal     uintptr
-	InternalHigh uintptr
-	Offset       uint32
-	OffsetHigh   uint32
-	HEvent       syscall.Handle
+func protectDir(_ string) error { return nil }
+func checkDir(path string, fi os.FileInfo) error {
+	if !fi.IsDir() || fi.Mode()&os.ModeSymlink != 0 {
+		return errors.New("unsafe state directory")
+	}
+	return checkWindowsPath(path)
 }
 
-func protectDir(path string) error {
-	current, e := user.Current()
-	if e != nil {
-		return e
+func checkFile(path string, fi os.FileInfo) error {
+	if !fi.Mode().IsRegular() || fi.Mode()&os.ModeSymlink != 0 {
+		return errors.New("unsafe state file")
 	}
-	if current.Uid == "" {
-		return fmt.Errorf("current Windows SID unavailable")
-	}
-	cmd := exec.Command(
-		"icacls",
-		path,
-		"/grant:r",
-		"*"+current.Uid+":(OI)(CI)F",
-		"*S-1-5-18:(OI)(CI)F",
-		"*S-1-5-32-544:(OI)(CI)F",
-		"/inheritance:r",
-	)
-	cmd.Env = compat.HostEnvironment()
-	out, e := cmd.CombinedOutput()
-	if e != nil {
-		return fmt.Errorf("restrict state directory ACL: %w: %s", e, out)
-	}
-	return nil
+	return checkWindowsPath(path)
 }
-func checkDir(fi os.FileInfo) error  { return nil }
-func checkFile(fi os.FileInfo) error { return nil }
+
 func replaceFile(src, dst string) error {
-	a, e := syscall.UTF16PtrFromString(src)
-	if e != nil {
-		return e
-	}
-	b, e := syscall.UTF16PtrFromString(dst)
-	if e != nil {
-		return e
-	}
-	ok, _, err := moveFile.Call(uintptr(unsafe.Pointer(a)), uintptr(unsafe.Pointer(b)), 0x1|0x8)
-	if ok == 0 {
+	release, err := holdStateParents(dst)
+	if err != nil {
 		return err
 	}
-	return nil
+	defer release()
+	a, err := windows.UTF16PtrFromString(src)
+	if err != nil {
+		return err
+	}
+	b, err := windows.UTF16PtrFromString(dst)
+	if err != nil {
+		return err
+	}
+	return windows.MoveFileEx(
+		a,
+		b,
+		windows.MOVEFILE_REPLACE_EXISTING|windows.MOVEFILE_WRITE_THROUGH,
+	)
 }
-func syncDir(path string) error { return nil }
+func syncDir(_ string) error { return nil }
 
 type Lock struct {
 	file    *os.File
-	overlap overlapped
+	overlap windows.Overlapped
 }
 
 func (l *Lock) Close() error {
 	if l == nil {
 		return nil
 	}
-	ok, _, unlockErr := unlockFile.Call(
-		l.file.Fd(),
+	unlockErr := windows.UnlockFileEx(
+		windows.Handle(l.file.Fd()),
 		0,
 		0xffffffff,
 		0xffffffff,
-		uintptr(unsafe.Pointer(&l.overlap)),
+		&l.overlap,
 	)
 	closeErr := l.file.Close()
-	if ok == 0 {
-		return errors.Join(unlockErr, closeErr)
-	}
-	return closeErr
+	return errors.Join(unlockErr, closeErr)
 }
 
 func (s Store) Acquire(ctx context.Context, name string, shared bool) (*Lock, error) {
 	if e := s.Ensure(); e != nil {
 		return nil, e
 	}
-	f, e := os.OpenFile(s.Dir()+string(os.PathSeparator)+name+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	f, e := openStateFile(s.Dir()+string(os.PathSeparator)+name+".lock", windows.OPEN_ALWAYS)
 	if e != nil {
 		return nil, e
 	}
-	l := &Lock{file: f}
-	flags := uintptr(0x1)
+	flags := uint32(windows.LOCKFILE_FAIL_IMMEDIATELY)
 	if !shared {
-		flags |= 0x2
+		flags |= windows.LOCKFILE_EXCLUSIVE_LOCK
 	}
+	return waitWindowsLock(ctx, f, flags)
+}
+
+func waitWindowsLock(ctx context.Context, f *os.File, flags uint32) (*Lock, error) {
+	l := &Lock{file: f}
 	for {
-		ok, _, err := lockFile.Call(
-			f.Fd(),
+		err := windows.LockFileEx(
+			windows.Handle(f.Fd()),
 			flags,
 			0,
 			0xffffffff,
 			0xffffffff,
-			uintptr(unsafe.Pointer(&l.overlap)),
+			&l.overlap,
 		)
-		if ok != 0 {
+		if err == nil {
 			return l, nil
 		}
-		if err != syscall.Errno(33) {
+		if err != windows.ERROR_LOCK_VIOLATION {
 			return nil, errors.Join(err, f.Close())
 		}
 		select {
