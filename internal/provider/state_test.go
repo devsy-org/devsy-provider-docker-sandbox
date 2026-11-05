@@ -74,18 +74,26 @@ func TestStopSettledRule(t *testing.T) {
 		{"stopped from unlisted", testPausedState, testUnitStopped, true},
 		{"still running", testUnitRunning, testUnitRunning, false},
 		{"same unlisted state", testPausedState, testPausedState, false},
-		{"different unlisted state", testPausedState, testRestingState, true},
-		{"unlisted state from running", testUnitRunning, testPausedState, true},
+		{"different unlisted state", testPausedState, testRestingState, false},
+		{"unlisted state from running", testUnitRunning, testPausedState, false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			if got := p.stopSettled(test.before, test.current); got != test.want {
+			if got := p.stopSettled(test.current); got != test.want {
 				t.Fatalf("stopSettled(%q, %q) = %t", test.before, test.current, got)
 			}
 		})
 	}
 	p.Profile.InventoryStates[testRestingState] = stateTransitional
-	if p.stopSettled(testPausedState, testRestingState) {
+	if p.stopSettled(testRestingState) {
 		t.Fatal("transitional state treated as stopped")
+	}
+}
+
+func requireUncertainStopTimeout(t *testing.T, err error, lastState string) {
+	t.Helper()
+	if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), lastState) ||
+		!strings.Contains(err.Error(), compat.IssuesURL) {
+		t.Fatalf("stop error = %v, want state and issue URL on timeout", err)
 	}
 }
 
@@ -93,12 +101,10 @@ func TestStopWaitsWhileUnlistedStateIsUnchanged(t *testing.T) {
 	f := unknownStateFixture(t).withExactResult("stopped")
 	f.backend.stopState = testPausedState
 	f.p.Backend = f.backend
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	err := f.p.Stop(ctx)
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("stop error = %v, want the wait to time out", err)
-	}
+	requireUncertainStopTimeout(t, err, testPausedState)
 	stored, loadErr := f.p.Store.Load()
 	requireNoError(t, loadErr)
 	if stored.Phase == stateStopped || stored.Operation == nil ||
@@ -107,14 +113,18 @@ func TestStopWaitsWhileUnlistedStateIsUnchanged(t *testing.T) {
 	}
 }
 
-func TestStopCompletesWhenUnlistedStateChanges(t *testing.T) {
+func TestStopWaitsWhenUnlistedStateChanges(t *testing.T) {
 	f := unknownStateFixture(t).withExactResult("stopped")
 	f.backend.stopState = testRestingState
 	f.p.Backend = f.backend
-	requireNoError(t, f.p.Stop(context.Background()))
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	err := f.p.Stop(ctx)
+	requireUncertainStopTimeout(t, err, testRestingState)
 	stored, err := f.p.Store.Load()
 	requireNoError(t, err)
-	if stored.Phase != stateStopped || stored.Operation != nil {
+	if stored.Phase == stateStopped || stored.Operation == nil ||
+		stored.Operation.Phase != phaseUncertain {
 		t.Fatalf("stop recorded %+v", stored)
 	}
 	text := f.warned.String()

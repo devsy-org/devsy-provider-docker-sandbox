@@ -44,12 +44,8 @@ func (p Provider) stopAdmitted(ctx context.Context) (result error) {
 	return p.stopLocked(ctx, r)
 }
 
-func (p Provider) stopSettled(before, current string) bool {
-	kind, mapped := p.Profile.InventoryStates[current]
-	if mapped {
-		return kind == stateStopped
-	}
-	return current != before
+func (p Provider) stopSettled(current string) bool {
+	return p.Profile.InventoryStates[current] == stateStopped
 }
 
 func (p Provider) stopLocked(ctx context.Context, r state.Record) error {
@@ -81,15 +77,28 @@ func (p Provider) stopLocked(ctx context.Context, r state.Record) error {
 	if e = sbx.CheckResult(out, r.SandboxName, stateStopped, p.lenient); e != nil {
 		return p.MarkUncertain(&r, e)
 	}
-	before := item.State
+	lastState := item.State
 	e = waitState(ctx, 200*time.Millisecond, func() (bool, error) {
 		item, e := p.ensureIdentityWith(ctx, r, stopMode)
 		if e != nil {
 			return false, e
 		}
-		return p.stopSettled(before, item.State), nil
+		lastState = item.State
+		return p.stopSettled(item.State), nil
 	})
 	if e != nil {
+		if ctx.Err() != nil {
+			e = errors.Join(
+				e,
+				ctx.Err(),
+				compat.Fail(
+					codeOperationUncertain,
+					"stop could not confirm a stopped state; last state %q; please file an issue at %s",
+					lastState,
+					compat.IssuesURL,
+				),
+			)
+		}
 		return p.MarkUncertain(&r, e)
 	}
 	return p.successful(&r, stateStopped, stateStopped)
