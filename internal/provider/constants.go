@@ -33,4 +33,9 @@ const (
 	kindCommand            = "command"
 	codeOperationUncertain = "E_OPERATION_UNCERTAIN"
 	unqualifiedHost        = "plan9/mips"
+	testUnitRevision       = "unit-revision"
+	testUnitImage          = "sha256:unit-image"
+	testUnitID             = "unit-id"
+	testStatusRunning      = "Running"
+	codeSBXVersion         = "E_SBX_VERSION"
 )

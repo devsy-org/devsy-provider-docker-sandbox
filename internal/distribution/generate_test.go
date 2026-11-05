@@ -54,18 +54,6 @@ func TestGenerateEmitsAllHostsWithActualBytes(t *testing.T) {
 	checkGeneratedMetadata(t, metadata, contents, directory)
 }
 
-func TestGenerateIgnoresDiskSizingSchemasOfUnqualifiedHosts(t *testing.T) {
-	directory := t.TempDir()
-	profilePath := filepath.Join(directory, "profile.json")
-	p := qualifiedProfile()
-	p.DiskSizingSchemas["linux/amd64"] = "unmeasured"
-	writeProfile(t, profilePath, p)
-	writeArtifacts(t, directory, "")
-	if _, err := Generate("v1.2.3", directory, profilePath); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func checkGeneratedMetadata(
 	t *testing.T,
 	metadata Metadata,
@@ -115,6 +103,9 @@ func TestGenerateRejectsIncompleteRelease(t *testing.T) {
 		{"unmeasured disk sizing schema", func(p *profile) {
 			p.DiskSizingSchemas[darwinHost] = "unmeasured"
 		}, "", false, "unqualified disk sizing"},
+		{"disk sizing schema for unqualified host", func(p *profile) {
+			p.DiskSizingSchemas["linux/amd64"] = "unmeasured"
+		}, "", false, "not in qualified_hosts"},
 		{"no core version", func(p *profile) { p.MinimumDevsyVersion = "" }, "", false, unqualified},
 		{"missing client revision", func(p *profile) {
 			p.QualifiedSBXRevisions[sbxVersion] = ""

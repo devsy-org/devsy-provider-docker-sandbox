@@ -16,7 +16,7 @@ type Backend interface {
 	Version(context.Context) (sbx.Version, error)
 	Inventory(context.Context, compat.Profile) (sbx.Inventory, error)
 	Inspect(context.Context, compat.Profile, string) (sbx.Inspection, error)
-	ShellSettings(context.Context, compat.Profile) error
+	ShellSettings(context.Context, compat.Profile, bool) error
 	Start(context.Context, sbx.StartRequest) (*sbx.Process, error)
 }
 type Provider struct {
@@ -25,6 +25,8 @@ type Provider struct {
 	Backend  Backend
 	Store    state.Store
 	Identity config.MachineIdentity
+	Warner   *compat.Warner
+	lenient  bool
 }
 
 func New(c config.Config, p compat.Profile) (Provider, error) {
@@ -42,6 +44,7 @@ func New(c config.Config, p compat.Profile) (Provider, error) {
 		Backend:  sbx.Client{Path: c.SBXPath, Store: store},
 		Store:    store,
 		Identity: identity,
+		Warner:   compat.Stderr,
 	}, nil
 }
 
@@ -55,38 +58,37 @@ func FromKey(c config.Config, p compat.Profile, key string) (Provider, error) {
 		Profile: p,
 		Backend: sbx.Client{Path: c.SBXPath, Store: s},
 		Store:   s,
+		Warner:  compat.Stderr,
 	}, nil
 }
 
-func (p Provider) compat(ctx context.Context, needsDevsy bool) error {
+func (p Provider) compat(ctx context.Context, needsDevsy bool) (bool, error) {
 	if needsDevsy {
 		if e := p.Profile.Devsy(ctx, p.Config.Devsy); e != nil {
-			return e
+			return false, e
 		}
 	}
 	if e := p.Profile.Host(); e != nil {
-		return e
+		return false, e
 	}
-	if _, e := p.compatBackendVersion(ctx); e != nil {
-		return e
+	if _, e := p.Backend.Version(ctx); e != nil {
+		return false, e
 	}
 	if _, e := p.Backend.Inventory(ctx, p.Profile); e != nil {
-		return e
+		return false, e
 	}
-	v, e := p.compatBackendVersion(ctx)
-	if e != nil {
-		return e
-	}
-	_, e = sbx.ServerVersion(v, p.Profile)
-	return e
-}
-
-func (p Provider) compatBackendVersion(ctx context.Context) (sbx.Version, error) {
 	v, e := p.Backend.Version(ctx)
 	if e != nil {
-		return v, e
+		return false, e
 	}
-	return v, p.Profile.SBX(v.Client.Version, v.Client.Revision)
+	daemon, e := sbx.DaemonVersion(v, p.Profile)
+	if e != nil {
+		return false, e
+	}
+	tuple := compat.Tuple{Client: v.Client.Version, Revision: v.Client.Revision, Daemon: daemon}
+	warning := p.Profile.TupleWarning(tuple)
+	p.Warner.Warn(warning)
+	return warning != "", nil
 }
 
 func (p Provider) load() (state.Record, error) {
@@ -355,8 +357,11 @@ func (p Provider) drainSessions(ctx context.Context, admission *state.Lock) (*st
 func (p Provider) live(
 	ctx context.Context,
 	needsDevsy bool,
-) error {
-	return p.compat(ctx, needsDevsy)
+) (Provider, error) {
+	lenient, e := p.compat(ctx, needsDevsy)
+	bound := p
+	bound.lenient = lenient
+	return bound, e
 }
 
 func (p Provider) guardPrior(r state.Record) (result error) {

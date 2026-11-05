@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -230,6 +231,15 @@ func validateQualifiedHosts(qualified profile) error {
 		)
 		if expected == "" || qualified.DiskSizingSchemas[host] != expected {
 			return fmt.Errorf("unqualified disk sizing schema for host %q", host)
+		}
+	}
+	return validateDiskSizingHosts(qualified)
+}
+
+func validateDiskSizingHosts(qualified profile) error {
+	for _, host := range slices.Sorted(maps.Keys(qualified.DiskSizingSchemas)) {
+		if !slices.Contains(qualified.QualifiedHosts, host) {
+			return fmt.Errorf("disk sizing schema for host %q is not in qualified_hosts", host)
 		}
 	}
 	return nil

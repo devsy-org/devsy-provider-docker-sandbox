@@ -13,10 +13,12 @@ Use the Go version in `go.mod`. Run commands through `mise run`:
 - `mise run format`: apply Go formatting.
 - `mise run test`: run race-enabled Go tests and `go vet`.
 - `mise run build`: build `dist/devsy-provider-docker-sandbox`.
-- `mise run package`: generate a checksum-pinned manifest from the native artifacts. The generator requires executables for linux/amd64, linux/arm64, darwin/arm64 and windows/amd64, and requires measured disk sizing evidence for every host listed in `qualified_hosts`.
+- `mise run package`: generate a checksum-pinned manifest from the native artifacts. The generator requires executables for linux/amd64, linux/arm64, darwin/arm64 and windows/amd64, requires measured disk sizing evidence for every host listed in `qualified_hosts`, and rejects disk sizing evidence for a host that is not listed.
 - `mise run pre-commit`: run all prek hooks.
 
-Native VM suites run only on authenticated, virtualization-capable runners. A successful Go build or a client-only `sbx version` response is not native qualification. A host without native evidence is built and unit tested only. It still runs, with one warning that says so, and `doctor` reports the same warning. Only the host check and the per-host disk sizing admission depend on `qualified_hosts`. Keep every other fail-closed check: sbx version and revision, daemon schema, identity and the guest disk capacity probe.
+Native VM suites run only on authenticated, virtualization-capable runners. A successful Go build or a client-only `sbx version` response is not native qualification. A host without native evidence is built and unit tested only. It still runs, with one warning that says so, and `doctor` reports the same warning. Only the host check and the per-host disk sizing admission depend on `qualified_hosts`.
+
+An `sbx` client version, client revision or daemon version outside the qualified combination in `internal/compat/profile.json` must never block a command, because `sbx` ships faster than the provider can qualify it. Every command that contacts `sbx`, except `doctor`, warns once per process on standard error and proceeds best effort, including status, stop, delete and recover, so users can always stop and delete their VMs after an `sbx` update. Guest command execution does not warn because its standard error belongs to the guest. `doctor` lists the same warning and reports a compatibility state of `warning`. Never write the warning to standard output, which Devsy parses. For an unqualified combination decode `sbx` output leniently by ignoring unknown JSON fields while still requiring every field the provider uses. A qualified combination keeps the exact schema checks. Output that cannot be decoded, an immutable ID or ownership mismatch, an unrecognized sandbox state and a failed guest disk capacity probe stay fail-closed for every version.
 
 ## Code quality and Go behavior
 

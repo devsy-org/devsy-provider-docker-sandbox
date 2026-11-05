@@ -10,15 +10,20 @@ import (
 	"github.com/devsy-org/devsy-provider-docker-sandbox/internal/state"
 )
 
-func (p Provider) Stop(ctx context.Context) (result error) {
+func (p Provider) Stop(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	if e := p.Profile.RequireOperationResultSchema(); e != nil {
 		return e
 	}
-	if e := p.live(ctx, false); e != nil {
+	bound, e := p.live(ctx, false)
+	if e != nil {
 		return e
 	}
+	return bound.stopAdmitted(ctx)
+}
+
+func (p Provider) stopAdmitted(ctx context.Context) (result error) {
 	mutation, e := p.mutations(ctx)
 	if e != nil {
 		return e
@@ -65,7 +70,7 @@ func (p Provider) stopLocked(ctx context.Context, r state.Record) error {
 			),
 		)
 	}
-	if e = sbx.CheckResult(out, r.SandboxName, stateStopped); e != nil {
+	if e = sbx.CheckResult(out, r.SandboxName, stateStopped, p.lenient); e != nil {
 		return p.MarkUncertain(&r, e)
 	}
 	e = waitState(ctx, 200*time.Millisecond, func() (bool, error) {

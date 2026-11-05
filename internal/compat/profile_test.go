@@ -10,9 +10,12 @@ import (
 )
 
 const (
-	betaMinimum = "v1.27.0-beta.4"
-	unmeasured  = "unmeasured"
-	otherHost   = "plan9/mips"
+	betaMinimum      = "v1.27.0-beta.4"
+	unmeasured       = "unmeasured"
+	otherHost        = "plan9/mips"
+	measuredVersion  = "v0.50.1"
+	measuredRevision = "measured"
+	newerVersion     = "v0.51.0"
 )
 
 func TestUnqualifiedProfileFailsClosed(t *testing.T) {
@@ -171,9 +174,9 @@ func measuredProfile() Profile {
 	return Profile{
 		ShellSettingSchema:    ShellSettingSchemaV0501,
 		OperationResultSchema: OperationResultSchemaV0501,
-		QualifiedSBXVersions:  []string{"v0.50.1"},
+		QualifiedSBXVersions:  []string{measuredVersion},
 		QualifiedSBXRevisions: map[string]string{
-			"v0.50.1": "ddb0268d7124b9cf98955d0b08ffd71a0dfcebe4",
+			measuredVersion: "ddb0268d7124b9cf98955d0b08ffd71a0dfcebe4",
 		},
 		QualifiedHosts:    []string{"darwin/arm64"},
 		DiskSizingSchemas: map[string]string{"darwin/arm64": DiskSizingSchemaDarwinARM64V0501},
@@ -206,8 +209,72 @@ func TestMeasuredDiskSizingOnQualifiedHost(t *testing.T) {
 	if err := p.RequireDiskSizingQualification(); err != nil {
 		t.Fatal(err)
 	}
-	p.QualifiedSBXRevisions["v0.50.1"] = unmeasured
+	p.QualifiedSBXRevisions[measuredVersion] = unmeasured
 	if err := p.RequireDiskSizingQualification(); err == nil {
 		t.Fatal("unmeasured client revision accepted")
 	}
+}
+
+func tupleProfile() Profile {
+	return Profile{
+		QualifiedSBXVersions:    []string{measuredVersion},
+		QualifiedSBXRevisions:   map[string]string{measuredVersion: measuredRevision},
+		QualifiedDaemonVersions: map[string][]string{measuredVersion: {measuredVersion}},
+	}
+}
+
+func TestTupleQualification(t *testing.T) {
+	p := tupleProfile()
+	for _, test := range []struct {
+		name      string
+		tuple     Tuple
+		qualified bool
+	}{
+		{"qualified tuple", Tuple{measuredVersion, measuredRevision, measuredVersion}, true},
+		{"newer client", Tuple{newerVersion, measuredRevision, measuredVersion}, false},
+		{"other revision", Tuple{measuredVersion, "other", measuredVersion}, false},
+		{"other daemon", Tuple{measuredVersion, measuredRevision, newerVersion}, false},
+		{"no revision", Tuple{measuredVersion, "", measuredVersion}, false},
+		{"no daemon", Tuple{measuredVersion, measuredRevision, ""}, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := p.TupleQualified(test.tuple); got != test.qualified {
+				t.Fatalf("TupleQualified(%+v) = %t", test.tuple, got)
+			}
+			if warning := p.TupleWarning(test.tuple); (warning == "") != test.qualified {
+				t.Fatalf("TupleWarning(%+v) = %q", test.tuple, warning)
+			}
+		})
+	}
+}
+
+func TestTupleWarningNamesBothVersionsAndIssueTracker(t *testing.T) {
+	warning := tupleProfile().TupleWarning(Tuple{newerVersion, "", newerVersion})
+	for _, want := range []string{
+		"sbx v0.51.0 revision unknown daemon v0.51.0",
+		"sbx v0.50.1 revision measured daemon v0.50.1",
+		"file an issue",
+		IssuesURL,
+	} {
+		if !strings.Contains(warning, want) {
+			t.Fatalf("warning %q lacks %q", warning, want)
+		}
+	}
+	if !strings.Contains((Profile{}).TupleWarning(Tuple{"v1", "r", "v1"}), "qualified: none") {
+		t.Fatal("empty profile warning does not say nothing is qualified")
+	}
+}
+
+func TestWarnerEmitsEachMessageOnce(t *testing.T) {
+	var out strings.Builder
+	w := NewWarner(&out)
+	w.Warn("first")
+	w.Warn("first")
+	w.Warn("second")
+	w.Warn("")
+	if out.String() != "warning: first\nwarning: second\n" {
+		t.Fatalf("warnings = %q", out.String())
+	}
+	var disabled *Warner
+	disabled.Warn("ignored")
 }

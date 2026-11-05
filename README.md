@@ -2,15 +2,17 @@
 
 This provider gives each Devsy machine one local Docker Sandboxes microVM. Devsy runs its Linux agent and built-in Docker driver inside that VM. A workspace devcontainer, its builds, Features and Compose services use the VM's private Docker Engine, not the workstation's Docker Engine.
 
-**Release status:** Every release publishes provider executables for linux/amd64, linux/arm64, darwin/arm64 and windows/amd64. Each executable is built and unit tested on its own native GitHub runner. Only darwin/arm64 with `sbx` v0.50.1 has native qualification evidence from a real VM run. The other three hosts are built and unit tested only. On those hosts the provider runs with a warning that states they have no native qualification evidence. A successful provider build and the `sbx` client reporting its version do not establish that a VM can start. Publication remains gated on a signed provider tag, a compatible published Devsy core release, reviewed evidence for every natively qualified host and the protected `provider-release` environment.
+**Release status:** Every release publishes provider executables for linux/amd64, linux/arm64, darwin/arm64 and windows/amd64. Each executable is built and unit tested on its own native GitHub runner. Only darwin/arm64 with `sbx` v0.50.1 has native qualification evidence from a real VM run. The other three hosts are built and unit tested only. On those hosts the provider runs with a warning that states they have no native qualification evidence. Other `sbx` versions also run with a warning, because `sbx` releases faster than this provider can qualify it. A successful provider build and the `sbx` client reporting its version do not establish that a VM can start. Publication remains gated on a signed provider tag, a compatible published Devsy core release, reviewed evidence for every natively qualified host and the protected `provider-release` environment.
 
 ## Getting started
 
 The provider is built for macOS 14 or later on Apple silicon with platform virtualization, Windows 11 amd64 with Windows Hypervisor Platform enabled, and Ubuntu 24.04 or later on amd64 or arm64 with accessible KVM. A VM host also needs nested virtualization. Only macOS arm64 is natively qualified. The other hosts run with a warning and are not covered by native evidence. The provider prints that warning on standard error during init, create and start, and doctor lists it under warnings. A qualified host never warns. Intel macOS, Windows arm64, WSL and other Linux distributions are not advertised.
 
+A newer `sbx` than the qualified version never blocks a command. When the `sbx` client version, client revision or daemon version is not the qualified combination, the command proceeds on a best effort basis. Each command that contacts `sbx`, except doctor and guest command execution, prints one warning on standard error, once per process, naming the detected and qualified versions and asking you to file an issue. Doctor lists the same warning in its output and reports its compatibility state as a warning, not an error. Output that cannot be decoded, a sandbox identity mismatch and a failed guest capacity probe still stop the command with an error. For an unqualified `sbx` version the provider ignores unknown JSON fields but still requires the fields it uses. A qualified version keeps the exact schema checks.
+
 Install the standalone [`sbx` executable](https://docs.docker.com/ai/sandboxes/install/) through Docker's host-specific instructions. Sign in using Docker's own workflow outside Devsy. Configure the required [network policy](https://docs.docker.com/ai/sandboxes/configuration/settings/) using Docker's tooling. The provider does not install Docker, sign you in, modify your policy or change a host Docker daemon.
 
-Install a compatible Devsy core release first. The release compatibility profile states its minimum version and the supported `sbx` client and daemon versions. Then install the provider:
+Install a compatible Devsy core release first. The release compatibility profile states its minimum version and the `sbx` client and daemon versions that were qualified. Then install the provider:
 
 ```sh
 devsy provider add docker-sandbox
@@ -49,7 +51,7 @@ Use `devsy provider list --result-format=json` to identify the installed alias a
 /path/to/installed/provider/binary doctor --machine-key KEY --json
 ```
 
-Doctor reads the external journal and scoped backend observations without booting a stopped VM, uploading diagnostics or printing credentials. The machine key is the exact key printed in a provider failure or journal record. It reports client/daemon compatibility, a warning when the host has no native qualification evidence, the recorded sandbox name and immutable ID, and the observed state. An unavailable inventory is not proof the machine disappeared.
+Doctor reads the external journal and scoped backend observations without booting a stopped VM, uploading diagnostics or printing credentials. The machine key is the exact key printed in a provider failure or journal record. It reports the observed `sbx` client and daemon versions with a compatibility state of `qualified` or `warning`, lists a warning when the host has no native qualification evidence or the `sbx` version is not qualified, and shows the recorded sandbox name and immutable ID and the observed state. An unavailable inventory is not proof the machine disappeared.
 
 The provider retries a transient inventory and inspection disagreement once. It never treats a changed immutable ID, a host workspace mount, or an unqualified state as a missing machine.
 
@@ -77,7 +79,7 @@ After uninstalling Devsy's machine registration or force deleting it, reinstall 
 /path/to/installed/provider/binary delete --machine-key KEY
 ```
 
-Deletion still checks the qualified `sbx` profile, ownership ID, active sessions and verified absence. If those checks fail, retain the journal for recovery. Host-wide `sbx reset` and global prune are never recovery instructions for this provider.
+Deletion still checks the recorded sandbox name, ownership ID, active sessions and verified absence. An `sbx` version outside the qualified set only warns, so you can still stop and delete a VM after updating `sbx`. If the identity checks fail, retain the journal for recovery. Host-wide `sbx reset` and global prune are never recovery instructions for this provider.
 
 ## Development
 

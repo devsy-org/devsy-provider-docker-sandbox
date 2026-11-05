@@ -22,7 +22,9 @@ func (p Provider) Command(
 	program string,
 	streams CommandStreams,
 ) (result error) {
-	if e := p.live(ctx, true); e != nil {
+	quiet := p
+	quiet.Warner = nil
+	if _, e := quiet.live(ctx, true); e != nil {
 		return e
 	}
 	admissionCtx, cancel := context.WithTimeout(ctx, 30*time.Second)

@@ -10,15 +10,20 @@ import (
 	"github.com/devsy-org/devsy-provider-docker-sandbox/internal/state"
 )
 
-func (p Provider) Delete(ctx context.Context) (result error) {
+func (p Provider) Delete(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
 	if e := p.Profile.RequireOperationResultSchema(); e != nil {
 		return e
 	}
-	if e := p.live(ctx, false); e != nil {
+	bound, e := p.live(ctx, false)
+	if e != nil {
 		return e
 	}
+	return bound.deleteAdmitted(ctx)
+}
+
+func (p Provider) deleteAdmitted(ctx context.Context) (result error) {
 	mutation, e := p.mutations(ctx)
 	if e != nil {
 		return e
@@ -74,7 +79,7 @@ func (p Provider) deleteLocked(ctx context.Context, r state.Record) error {
 			),
 		)
 	}
-	if e = sbx.CheckResult(out, r.SandboxName, "removed"); e != nil {
+	if e = sbx.CheckResult(out, r.SandboxName, "removed", p.lenient); e != nil {
 		return p.MarkUncertain(&r, e)
 	}
 	e = waitState(

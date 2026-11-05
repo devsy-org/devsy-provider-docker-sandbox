@@ -72,7 +72,7 @@ func TestDoctorWarnsOnUnqualifiedHostAndNotOnQualifiedHost(t *testing.T) {
 		warning bool
 	}{
 		{"unqualified", []string{unqualifiedHost}, true},
-		{"qualified", []string{runtime.GOOS + "/" + runtime.GOARCH}, false},
+		{"native host", []string{runtime.GOOS + "/" + runtime.GOARCH}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p := localProvider(t)
@@ -149,7 +149,7 @@ type simulatedInventory struct {
 func (b simulatedInventory) Version(context.Context) (sbx.Version, error) {
 	var version sbx.Version
 	version.Client.Version = testUnitClient
-	version.Client.Revision = "unit-revision"
+	version.Client.Revision = testUnitRevision
 	version.Server = json.RawMessage(`{"version":"unit-daemon","state":"running"}`)
 	return version, nil
 }
@@ -175,12 +175,12 @@ func (b simulatedInventory) Inspect(
 	return sbx.Inspection{
 		Name:          name,
 		State:         b.sandbox.State,
-		ImageDigest:   "sha256:unit-image",
+		ImageDigest:   testUnitImage,
 		RuntimeMounts: []json.RawMessage{},
 	}, nil
 }
 
-func (b simulatedInventory) ShellSettings(context.Context, compat.Profile) error {
+func (b simulatedInventory) ShellSettings(context.Context, compat.Profile, bool) error {
 	return errors.New("unexpected settings read")
 }
 
@@ -228,7 +228,7 @@ func newObserveSnapshotFixture(t *testing.T) observeSnapshotFixture {
 	inspectedStopped := sbx.Inspection{
 		Name:          r.SandboxName,
 		State:         stateStopped,
-		ImageDigest:   "sha256:unit-image",
+		ImageDigest:   testUnitImage,
 		RuntimeMounts: []json.RawMessage{},
 	}
 	return observeSnapshotFixture{p, r, running, stopped, inspectedStopped}
@@ -533,7 +533,7 @@ func simulatedProfile(t *testing.T) compat.Profile {
 	t.Helper()
 	p := compat.Profile{
 		QualifiedSBXVersions:    []string{testUnitClient},
-		QualifiedSBXRevisions:   map[string]string{testUnitClient: "unit-revision"},
+		QualifiedSBXRevisions:   map[string]string{testUnitClient: testUnitRevision},
 		QualifiedDaemonVersions: map[string][]string{testUnitClient: {"unit-daemon"}},
 		DaemonSchema:            "unit-only",
 		InventoryStates:         map[string]string{testUnitRunning: stateRunning},
@@ -549,7 +549,7 @@ func TestStatusWithActiveSessionAndOrphanedAttempt(t *testing.T) {
 	p.Profile = simulatedProfile(t)
 	r, err := state.New(p.Identity, config.Spec{CPUs: 1})
 	requireNoError(t, err)
-	r.Phase, r.DesiredState, r.SandboxID, r.Operation = phaseReady, stateRunning, "unit-id", nil
+	r.Phase, r.DesiredState, r.SandboxID, r.Operation = phaseReady, stateRunning, testUnitID, nil
 	p.Backend = simulatedInventory{
 		sandbox: sbx.Sandbox{
 			ID:       r.SandboxID,
@@ -580,7 +580,7 @@ func TestStatusWithActiveSessionAndOrphanedAttempt(t *testing.T) {
 	lease, err := p.Store.Acquire(context.Background(), "sessions", true)
 	requireNoError(t, err)
 	status, err := p.Status(context.Background())
-	if err != nil || status != "Running" {
+	if err != nil || status != testStatusRunning {
 		t.Fatalf("live session status = %q, %v", status, err)
 	}
 	if err := closeLock(lease); err != nil {
@@ -972,6 +972,12 @@ func TestCommandChildHelper(_ *testing.T) {
 	if mode == "" {
 		return
 	}
+	if mode == "output" {
+		if _, err := os.Stdout.WriteString(os.Getenv("PROVIDER_COMMAND_TEST_OUTPUT")); err != nil {
+			os.Exit(2)
+		}
+		os.Exit(0)
+	}
 	if _, err := os.Stdout.Write([]byte(phaseReady)); err != nil {
 		os.Exit(2)
 	}
@@ -1031,7 +1037,7 @@ func commandOutcomeProvider(t *testing.T, mode string) (Provider, state.Record, 
 	t.Setenv("PROVIDER_COMMAND_TEST_CHILD", mode)
 	r, err := state.New(p.Identity, p.Config.Spec)
 	requireNoError(t, err)
-	r.Phase, r.DesiredState, r.SandboxID, r.Operation = phaseReady, stateRunning, "unit-id", nil
+	r.Phase, r.DesiredState, r.SandboxID, r.Operation = phaseReady, stateRunning, testUnitID, nil
 	requireNoError(t, p.Store.Save(r))
 	executable, err := os.Executable()
 	requireNoError(t, err)

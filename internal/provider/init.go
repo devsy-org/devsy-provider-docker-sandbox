@@ -18,12 +18,13 @@ func Init(ctx context.Context, c config.Config, p compat.Profile) error {
 		return e
 	}
 	backend := sbx.Client{Path: c.SBXPath, Store: state.Store{Root: root}}
-	provider := Provider{Config: c, Profile: p, Backend: backend}
-	if e = provider.live(ctx, true); e != nil {
+	provider := Provider{Config: c, Profile: p, Backend: backend, Warner: compat.Stderr}
+	provider, e = provider.live(ctx, true)
+	if e != nil {
 		return e
 	}
 	if e = p.RequireDiskSizingQualification(); e != nil {
 		return e
 	}
-	return backend.ShellSettings(ctx, p)
+	return backend.ShellSettings(ctx, p, provider.lenient)
 }
