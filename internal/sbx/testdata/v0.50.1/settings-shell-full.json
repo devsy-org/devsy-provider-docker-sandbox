@@ -1,0 +1,8 @@
+{
+  "default": "",
+  "description": "Kit reference (registry reference, oci:// or git+ URL, or absolute path) that `sbx run shell` and `sbx create shell` resolve instead of the default kit for shell. Applies to local sandboxes only. Unset to restore the default.",
+  "key": "kit.shortcuts.shell",
+  "source": "default",
+  "type": "string",
+  "value": ""
+}

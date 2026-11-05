@@ -1,0 +1,118 @@
+name: Qualified provider release
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Existing signed release tag
+        required: true
+        type: string
+      core_ref:
+        description: Qualified, released Devsy core commit SHA
+        required: true
+        type: string
+      core_tag:
+        description: Published compatible Devsy core release tag
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: read
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require verified source tag and signed candidate commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          CORE_REF: ${{ inputs.core_ref }}
+          CORE_TAG: ${{ inputs.core_tag }}
+        shell: bash
+        run: |
+          test "$GITHUB_REF" = "refs/tags/$VERSION"
+          [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$CORE_REF" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse "refs/tags/$VERSION^{commit}")" = "$GITHUB_SHA"
+          tag_object="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$VERSION" --jq .object.sha)"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag_object" --jq '.verification.verified')" = true
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$GITHUB_SHA" --jq '.verification.verified')" = true
+          [[ "$CORE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$ ]]
+          minimum="$(jq -r .minimum_devsy_version internal/compat/profile.json)"
+          printf '%s\n' "${minimum//-/\~}" "${CORE_TAG//-/\~}" | sort -V -C
+          test "$(gh api "repos/devsy-org/devsy/releases/tags/$CORE_TAG" --jq '.draft == false')" = true
+          core_object="$(gh api "repos/devsy-org/devsy/git/ref/tags/$CORE_TAG" --jq .object.sha)"
+          core_type="$(gh api "repos/devsy-org/devsy/git/ref/tags/$CORE_TAG" --jq .object.type)"
+          if [[ "$core_type" == tag ]]; then
+            core_object="$(gh api "repos/devsy-org/devsy/git/tags/$core_object" --jq .object.sha)"
+          fi
+          test "$core_object" = "$CORE_REF"
+          test "$(gh api "repos/devsy-org/devsy/git/commits/$CORE_REF" --jq '.verification.verified')" = true
+  package:
+    needs: source
+    uses: ./.github/workflows/native.yml
+    with:
+      version: ${{ inputs.version }}
+      core_ref: ${{ inputs.core_ref }}
+  qualification:
+    needs: package
+    uses: ./.github/workflows/e2e.yml
+    with:
+      version: ${{ inputs.version }}
+      core_ref: ${{ inputs.core_ref }}
+      core_tag: ${{ inputs.core_tag }}
+  publish:
+    needs: [package, qualification]
+    runs-on: ubuntu-latest
+    environment: provider-release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: provider-release
+          path: dist
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: qualified-native-evidence
+          path: dist
+      - name: Verify released manifest and profile
+        shell: bash
+        run: |
+          test -s dist/provider.yaml
+          test -s dist/checksums.txt
+          test -s dist/compatibility-profile.json
+          cmp internal/compat/profile.json dist/compatibility-profile.json
+          (cd dist && sha256sum --check checksums.txt)
+      - name: Produce version-specific release notes
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+          CORE_REF: ${{ inputs.core_ref }}
+          CORE_TAG: ${{ inputs.core_tag }}
+          EVIDENCE_FILE: dist/native-evidence.json
+        run: |
+          test -s "$EVIDENCE_FILE"
+          {
+            printf 'Docker Sandboxes provider %s\n\n' "$VERSION"
+            printf 'Required Devsy core release: %s (%s)\n\n' "$CORE_TAG" "$CORE_REF"
+            printf 'Native VM qualification for this candidate:\n'
+            jq -r '.hosts[] | "- \(.host): sbx client \(.client_version), daemon \(.daemon_version), evidence \(.ci_run_url)"' "$EVIDENCE_FILE"
+            printf '\nThe manifest includes only these qualified hosts. Install sbx and sign in separately. Deleting a default workspace machine removes all guest data, including named volumes.\n'
+          } > dist/RELEASE_NOTES.txt
+      - name: Publish complete release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          CORE_TAG: ${{ inputs.core_tag }}
+        run: |
+          flags=()
+          if [[ "$CORE_TAG" == *-* ]]; then flags+=(--prerelease); fi
+          gh release create "$VERSION" dist/* --verify-tag --title "$VERSION" --notes-file dist/RELEASE_NOTES.txt "${flags[@]}"

@@ -1,0 +1,32 @@
+{
+  "observed_at": "2026-11-02",
+  "host": "darwin/arm64",
+  "host_os_version": "darwin 25.6.0",
+  "sbx_revision": "ddb0268d7124b9cf98955d0b08ffd71a0dfcebe4",
+  "sbx_version": "v0.50.1",
+  "sbx_archive_sha256": "dc5f001c42698f5e18d274843ddb81c911ab2eee92000b1ddd722bfbf5028992",
+  "version_command": "sbx version --format json",
+  "version_exit": 0,
+  "version_stdout": "version-daemon-unavailable.json",
+  "inventory_command": "sbx ls --format json",
+  "inventory_exit": 1,
+  "inventory_stderr": "inventory-not-signed-in.stderr",
+  "evidence_boundary": "Authenticated macOS arm64 sbx client, daemon, mountless and mounted inventory, inspection, stop, remove, byte streams, guest Docker and disk sizing were observed. A complete Devsy workspace lifecycle and other host tuples remain unqualified.",
+  "latest_observed_at": "2026-11-04",
+  "network_policy": "balanced",
+  "sizing_requested": {"root_bytes":25769803776,"docker_bytes":12884901888},
+  "sizing_observed": {"root_bytes":25185042432,"docker_bytes":12573614080,"root_device":29,"docker_device":65072},
+  "captures": [
+    {"file":"version-daemon-running.json","sha256":"e5b141f3aa562d28a411efa1f79ca4d61dee6094b8428877a7fdaa1368ec5967","kind":"version","command":"sbx version --format json","exit":0},
+    {"file":"inventory-running.json","sha256":"325dae8eb1f9a1d778c0d53eda01c5858ee6b887fd93d78089187a8e7555e65c","kind":"inventory_running","command":"sbx ls --format json","exit":0,"sanitized":"filtered to scoped sandbox"},
+    {"file":"inventory-stopped.json","sha256":"9a651626fecfc45903798e149f5dcd6e18b180661dc94c7c711491912e224637","kind":"inventory_stopped","command":"sbx ls --format json","exit":0,"sanitized":"filtered to scoped sandbox"},
+    {"file":"inventory-mounted.json","sha256":"f4a25774452a0db73966080c15b13aea3b81d6a0950fb22197c33c2abfd480bf","kind":"inventory_mounted","command":"sbx ls --format json","exit":0,"sanitized":"filtered to isolated host-mount sentinel sandbox"},
+    {"file":"inspect-mountless.json","sha256":"9ed73ee40e9f0721d4228ab6c253c714f12b5f7db2017423ea734b1b3bfa6b34","kind":"inspect","command":"sbx inspect devsy-qual-20261104 --format json","exit":0,"sanitized":"retained identity, state, image digest and runtime mounts"},
+    {"file":"settings-shell-full.json","sha256":"b061511bd0e40e026c3e40bbc2bdd3396c99136d1223ff9ba479745a9c2b2087","kind":"settings","command":"sbx settings get --json kit.shortcuts.shell","exit":0},
+    {"file":"stop-result.json","sha256":"fdc82aa42ee84807b7134621e2388421834274bb57d7d53dffb72ba5b5206712","kind":"stop_result","command":"sbx stop --format json devsy-qual-20261104","exit":0,"postcondition":"inventory reported stopped with the same immutable ID"},
+    {"file":"rm-result.json","sha256":"4229d31795ef0148c81c7ebf2d5ed372de58b55806e0bb604d62db72ac099460","kind":"rm_result","command":"sbx rm --force --format json devsy-qual-20261104","exit":0,"postcondition":"inventory had no scoped sandbox"},
+    {"file":"failure-missing-sandbox.txt","sha256":"de7b1b202dc7d62db3349d649fee473ac176d0e50e37b0d411ae7896efb56fcf","kind":"failure","command":"sbx exec --interactive --user root --workdir / devsy-qual-absent-20261104 -- /bin/true","exit":125,"stream":"stderr"},
+    {"file":"filesystem-sized.txt","sha256":"d10d3ecc34dd32af5be424c0a90374bee5b47675d7cabe867e4dc44bc5901673","kind":"sizing","command":"sbx exec --interactive --user root --workdir / devsy-qual-20261104 -- /bin/sh -c 'stat -c %d / /var/lib/docker; df -B1 / /var/lib/docker'","exit":0},
+    {"file":"network-denied.json","sha256":"cfd1f7e136025eed95a7646cce05804d78b5c0a49c99d025bcaea75a7082ece3","kind":"network_denial","command":"sbx policy check network --sandbox devsy-qual-20261104 --json https://example.org/","exit":1,"sanitized":"retained decision and target"}
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "name": "sandbox-native-image",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+  "postCreateCommand": "printf ready > /tmp/devsy-sandbox-post-create"
+}

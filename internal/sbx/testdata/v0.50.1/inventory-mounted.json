@@ -1,0 +1,16 @@
+[
+  {
+    "name": "devsy-qual-mount-20261104",
+    "id": "1fc518de-c3a2-4faf-b78c-d009a2d4ef3f",
+    "agent": "shell",
+    "status": "stopped",
+    "last_used_at": "2026-11-04T06:08:38.18871Z",
+    "workspaces": [
+      "/tmp/devsy-sbx-qualification/mount-sentinel"
+    ],
+    "cpus": 2,
+    "memory": "4g",
+    "memory_mib": 4096,
+    "created_at": "2026-11-04T06:08:36Z"
+  }
+]

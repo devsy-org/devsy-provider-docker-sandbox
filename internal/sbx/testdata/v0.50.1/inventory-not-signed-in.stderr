@@ -1,0 +1,2 @@
+error: not signed in to Docker
+  try: sbx login

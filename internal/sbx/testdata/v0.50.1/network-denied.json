@@ -1,0 +1,6 @@
+{
+  "allowed": false,
+  "deny_kind": "implicit",
+  "reason": "No matching allow rule (default deny)",
+  "target": "example.org:443"
+}
