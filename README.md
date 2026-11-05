@@ -53,7 +53,7 @@ Use `devsy provider list --result-format=json` to identify the installed alias a
 
 Doctor reads the external journal and scoped backend observations without booting a stopped VM, uploading diagnostics or printing credentials. The machine key is the exact key printed in a provider failure or journal record. It reports the observed `sbx` client and daemon versions with a compatibility state of `qualified` or `warning`, lists a warning when the host has no native qualification evidence or the `sbx` version is not qualified, and shows the recorded sandbox name and immutable ID and the observed state. An unavailable inventory is not proof the machine disappeared.
 
-The provider retries a transient inventory and inspection disagreement once. It never treats a changed immutable ID, a host workspace mount, or an unqualified state as a missing machine.
+The provider retries a transient inventory and inspection disagreement once. It never treats a changed immutable ID, a host workspace mount, or an unqualified state as a missing machine. Only stop, delete and recover accept a state they do not recognize.
 
 Every guest command runs with a private session variable named after its journaled attempt. When Devsy cancels a command, the provider stops the local `sbx` client and then ends every guest process that still carries that session variable. Other sessions and the VM keep running. A guest process that clears its environment can outlive cancellation. If the provider cannot confirm the guest cleanup it reports `E_SESSION_UNTERMINATED` with the session identifier.
 
@@ -79,7 +79,7 @@ After uninstalling Devsy's machine registration or force deleting it, reinstall 
 /path/to/installed/provider/binary delete --machine-key KEY
 ```
 
-Deletion still checks the recorded sandbox name, ownership ID, active sessions and verified absence. An `sbx` version outside the qualified set only warns, so you can still stop and delete a VM after updating `sbx`. If the identity checks fail, retain the journal for recovery. Host-wide `sbx reset` and global prune are never recovery instructions for this provider.
+Deletion still checks the recorded sandbox name, ownership ID, active sessions and verified absence. An `sbx` version outside the qualified set only warns, so you can still stop and delete a VM after updating `sbx`. The same holds when `sbx` reports a sandbox state the provider does not recognize. Stop, delete and recover warn once, still require the recorded immutable ID, and then proceed. Stop and delete verify the result by reading the inventory again, and delete requires the sandbox to be absent. Status, create and start still fail on an unrecognized state. If the identity checks fail, retain the journal for recovery. Host-wide `sbx reset` and global prune are never recovery instructions for this provider.
 
 ## Development
 

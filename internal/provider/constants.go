@@ -38,4 +38,6 @@ const (
 	testUnitID             = "unit-id"
 	testStatusRunning      = "Running"
 	codeSBXVersion         = "E_SBX_VERSION"
+	codeSBXStateUnknown    = "E_SBX_STATE_UNKNOWN"
+	testWindows            = "windows"
 )

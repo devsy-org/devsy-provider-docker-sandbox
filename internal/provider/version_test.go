@@ -57,6 +57,7 @@ func (b versionBackend) Inspect(
 	_ context.Context,
 	_ compat.Profile,
 	name string,
+	_ bool,
 ) (sbx.Inspection, error) {
 	return sbx.Inspection{
 		Name:          name,
@@ -262,7 +263,7 @@ func TestUnknownVersionRecoverOperationProceeds(t *testing.T) {
 }
 
 func TestUnknownVersionCreateProceedsWithLenientSettings(t *testing.T) {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == testWindows {
 		t.Skip("test-only Devsy version executable uses a POSIX shell")
 	}
 	f := buildVersionFixture(t, false, false)

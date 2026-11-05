@@ -162,6 +162,7 @@ func (b simulatedInventory) Inspect(
 	_ context.Context,
 	_ compat.Profile,
 	name string,
+	_ bool,
 ) (sbx.Inspection, error) {
 	if b.inspected != nil {
 		(*b.inspected)++
@@ -198,7 +199,12 @@ func (b snapshotBackend) Inventory(context.Context, compat.Profile) (sbx.Invento
 	return b.inventory()
 }
 
-func (b snapshotBackend) Inspect(context.Context, compat.Profile, string) (sbx.Inspection, error) {
+func (b snapshotBackend) Inspect(
+	context.Context,
+	compat.Profile,
+	string,
+	bool,
+) (sbx.Inspection, error) {
 	return b.inspect()
 }
 
@@ -383,7 +389,7 @@ func TestObserveRejectsInspectDisagreements(t *testing.T) {
 		{
 			"different state",
 			func(s *sbx.Inspection) { s.State = stateRunning },
-			"E_SBX_STATE_UNKNOWN",
+			codeSBXStateUnknown,
 		},
 		{"missing digest", func(s *sbx.Inspection) { s.ImageDigest = "" }, codeSBXSchema},
 		{"missing mounts", func(s *sbx.Inspection) { s.RuntimeMounts = nil }, codeSBXSchema},
@@ -417,7 +423,7 @@ func TestObserveRejectsUnqualifiedOwnedStateAndAttachedMode(t *testing.T) {
 		name, state, code string
 		detached          bool
 	}{
-		{"unqualified state", "waking", "E_SBX_STATE_UNKNOWN", true},
+		{"unqualified state", "waking", codeSBXStateUnknown, true},
 		{"attached running", stateRunning, codeSBXSchema, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -999,7 +1005,7 @@ func (w commandSignalWriter) Write(data []byte) (int, error) { return w(data) }
 type commandOutcomeCase struct{ name, mode, outcome, code string }
 
 func TestCommandAttemptOutcomes(t *testing.T) {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == testWindows {
 		t.Skip("test-only Devsy version executable uses a POSIX shell")
 	}
 	cases := []commandOutcomeCase{

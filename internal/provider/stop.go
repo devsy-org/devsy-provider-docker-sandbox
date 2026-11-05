@@ -44,8 +44,13 @@ func (p Provider) stopAdmitted(ctx context.Context) (result error) {
 	return p.stopLocked(ctx, r)
 }
 
+func (p Provider) notRunning(backendState string) bool {
+	kind, mapped := p.Profile.InventoryStates[backendState]
+	return !mapped || kind == stateStopped
+}
+
 func (p Provider) stopLocked(ctx context.Context, r state.Record) error {
-	item, e := p.ensureIdentity(ctx, r)
+	item, e := p.ensureIdentityWith(ctx, r, stopMode)
 	if e != nil {
 		return p.failWithStep(&r, e)
 	}
@@ -74,11 +79,11 @@ func (p Provider) stopLocked(ctx context.Context, r state.Record) error {
 		return p.MarkUncertain(&r, e)
 	}
 	e = waitState(ctx, 200*time.Millisecond, func() (bool, error) {
-		item, e := p.ensureIdentity(ctx, r)
+		item, e := p.ensureIdentityWith(ctx, r, stopMode)
 		if e != nil {
 			return false, e
 		}
-		return p.Profile.InventoryStates[item.State] == stateStopped, nil
+		return p.notRunning(item.State), nil
 	})
 	if e != nil {
 		return p.MarkUncertain(&r, e)
