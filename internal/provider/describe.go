@@ -22,5 +22,7 @@ Memory: %d bytes
 Root disk: %d bytes
 Docker disk: %d bytes
 Storage: private guest, mountless
-`, r.MachineID, r.SandboxName, status, r.Spec.CPUs, r.Spec.MemoryBytes, r.Spec.RootDiskBytes, r.Spec.DockerDiskBytes), nil
+`,
+		r.MachineID, r.SandboxName, status, r.Spec.CPUs, r.Spec.MemoryBytes,
+		r.Spec.RootDiskBytes, r.Spec.DockerDiskBytes), nil
 }

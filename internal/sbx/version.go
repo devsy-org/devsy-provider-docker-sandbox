@@ -4,17 +4,21 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
-	"github.com/devsy-org/devsy-provider-docker-sandbox/internal/compat"
+	"errors"
 	"io"
+	"slices"
 	"time"
+
+	"github.com/devsy-org/devsy-provider-docker-sandbox/internal/compat"
 )
 
+type ClientVersion struct {
+	Version  string `json:"version"`
+	Revision string `json:"revision"`
+}
+
 type Version struct {
-	Client struct {
-		Version  string `json:"version"`
-		Revision string `json:"revision"`
-	} `json:"client"`
+	Client ClientVersion   `json:"client"`
 	Server json.RawMessage `json:"server"`
 }
 
@@ -25,12 +29,13 @@ func exact(data []byte, v any) error {
 	}
 	var trailing any
 	if err := d.Decode(&trailing); err != io.EOF {
-		return fmt.Errorf("extra structured output")
+		return errors.New("extra structured output")
 	}
 	return nil
 }
+
 func (c Client) Version(ctx context.Context) (Version, error) {
-	data, e := c.Control(ctx, 10*time.Second, []string{"version", "--format", "json"}, nil)
+	data, e := c.Control(ctx, 10*time.Second, []string{"version", formatArg, jsonFormat}, nil)
 	if e != nil {
 		return Version{}, compat.Wrap("E_SBX_UNAVAILABLE", e)
 	}
@@ -40,6 +45,7 @@ func (c Client) Version(ctx context.Context) (Version, error) {
 	}
 	return v, nil
 }
+
 func ServerVersion(v Version, p compat.Profile) (string, error) {
 	if e := p.RequireDaemonSchema(); e != nil {
 		return "", e
@@ -48,13 +54,23 @@ func ServerVersion(v Version, p compat.Profile) (string, error) {
 		Version string `json:"version"`
 		State   string `json:"state"`
 	}
-	if e := json.Unmarshal(v.Server, &server); e != nil || server.Version == "" || server.State != "running" {
-		return "", compat.Fail("E_SBX_VERSION", "qualified successful-server daemon version unavailable")
+	if e := json.Unmarshal(
+		v.Server,
+		&server,
+	); e != nil || server.Version == "" ||
+		server.State != "running" {
+		return "", compat.Fail(
+			"E_SBX_VERSION",
+			"qualified successful-server daemon version unavailable",
+		)
 	}
-	for _, qualified := range p.QualifiedDaemonVersions[v.Client.Version] {
-		if server.Version == qualified {
-			return server.Version, nil
-		}
+	if slices.Contains(p.QualifiedDaemonVersions[v.Client.Version], server.Version) {
+		return server.Version, nil
 	}
-	return "", compat.Fail("E_SBX_VERSION", "sbx client %s and daemon %s are not a qualified pair", v.Client.Version, server.Version)
+	return "", compat.Fail(
+		"E_SBX_VERSION",
+		"sbx client %s and daemon %s are not a qualified pair",
+		v.Client.Version,
+		server.Version,
+	)
 }

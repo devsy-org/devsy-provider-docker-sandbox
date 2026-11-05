@@ -8,19 +8,12 @@ on:
       core_ref:
         required: true
         type: string
-  workflow_dispatch:
-    inputs:
-      version:
-        required: true
-        type: string
-      core_ref:
-        required: true
-        type: string
 permissions:
   contents: read
 jobs:
   plan:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       matrix: ${{ steps.hosts.outputs.matrix }}
     steps:
@@ -36,6 +29,7 @@ jobs:
   build:
     needs: plan
     runs-on: ${{ matrix.host.runner }}
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -69,6 +63,7 @@ jobs:
   manifest:
     needs: [plan, build]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -98,11 +93,18 @@ jobs:
   install:
     needs: [plan, manifest]
     runs-on: ${{ matrix.host.runner }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
         host: ${{ fromJSON(needs.plan.outputs.matrix) }}
     steps:
+      - name: Require pinned compatible Devsy core commit
+        shell: bash
+        env:
+          CORE_REF: ${{ inputs.core_ref }}
+        run: |
+          [[ "$CORE_REF" =~ ^[0-9a-f]{40}$ ]]
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           path: provider

@@ -10,7 +10,10 @@ import (
 )
 
 func TestLockDescriptorCloseOnExec(t *testing.T) {
-	s := Store{Root: filepath.Join(t.TempDir(), "devsy-provider-docker-sandbox", "state-v1"), Key: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+	s := Store{
+		Root: filepath.Join(t.TempDir(), "devsy-provider-docker-sandbox", "state-v1"),
+		Key:  testMachineKey,
+	}
 	lock, err := s.Acquire(context.Background(), "mutation", false)
 	if err != nil {
 		t.Fatal(err)
@@ -20,7 +23,12 @@ func TestLockDescriptorCloseOnExec(t *testing.T) {
 			t.Error(err)
 		}
 	}()
-	flags, _, errno := syscall.Syscall(syscall.SYS_FCNTL, lock.file.Fd(), uintptr(syscall.F_GETFD), 0)
+	flags, _, errno := syscall.Syscall(
+		syscall.SYS_FCNTL,
+		lock.file.Fd(),
+		uintptr(syscall.F_GETFD),
+		0,
+	)
 	if errno != 0 {
 		t.Fatal(errno)
 	}

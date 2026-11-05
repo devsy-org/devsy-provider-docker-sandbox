@@ -4,14 +4,17 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"github.com/devsy-org/devsy-provider-docker-sandbox/internal/compat"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/devsy-org/devsy-provider-docker-sandbox/internal/compat"
 )
 
 type Spec struct {
@@ -48,6 +51,7 @@ func option(getenv func(string) string, k, def string) string {
 	}
 	return def
 }
+
 func size(s string, minimum int64) (int64, error) {
 	if len(s) < 2 {
 		return 0, fmt.Errorf("invalid size %q", s)
@@ -64,7 +68,7 @@ func size(s string, minimum int64) (int64, error) {
 		return 0, fmt.Errorf("invalid size %q", s)
 	}
 	if n > int64(^uint64(0)>>1)/multiplier {
-		return 0, fmt.Errorf("size overflow")
+		return 0, errors.New("size overflow")
 	}
 	bytes := n * multiplier
 	if bytes < minimum {
@@ -72,14 +76,33 @@ func size(s string, minimum int64) (int64, error) {
 	}
 	return bytes, nil
 }
+
+func invalidExecutablePath(path string) bool {
+	return strings.TrimSpace(path) != path ||
+		strings.IndexFunc(path, func(r rune) bool { return r < 32 }) >= 0 ||
+		(!filepath.IsAbs(path) && (strings.ContainsRune(path, '/') || strings.ContainsRune(path, 92)))
+}
+
+func executableFile(info os.FileInfo, err error) bool {
+	return err == nil && info.Mode().IsRegular() &&
+		(runtime.GOOS == "windows" || info.Mode().Perm()&0o111 != 0)
+}
+
 func executable(getenv func(string) string) (string, error) {
 	path := option(getenv, "SBX_PATH", "sbx")
-	if strings.TrimSpace(path) != path || strings.IndexFunc(path, func(r rune) bool { return r < 32 }) >= 0 || (!filepath.IsAbs(path) && (strings.ContainsRune(path, '/') || strings.ContainsRune(path, 92))) {
-		return "", compat.Fail("E_SBX_NOT_INSTALLED", "SBX_PATH must be a bare executable or absolute executable path")
+	if invalidExecutablePath(path) {
+		return "", compat.Fail(
+			"E_SBX_NOT_INSTALLED",
+			"SBX_PATH must be a bare executable or absolute executable path",
+		)
 	}
 	resolved, err := exec.LookPath(path)
 	if err != nil {
-		return "", compat.Fail("E_SBX_NOT_INSTALLED", "sbx executable %q unavailable; install Docker Sandboxes from https://docs.docker.com/ai/sandboxes/get-started/", path)
+		return "", compat.Fail(
+			"E_SBX_NOT_INSTALLED",
+			"sbx executable %q unavailable; install Docker Sandboxes from https://docs.docker.com/ai/sandboxes/get-started/",
+			path,
+		)
 	}
 	resolved, err = filepath.Abs(resolved)
 	if err != nil {
@@ -90,11 +113,16 @@ func executable(getenv func(string) string) (string, error) {
 		return "", compat.Wrap("E_SBX_NOT_INSTALLED", err)
 	}
 	info, err := os.Stat(resolved)
-	if err != nil || !info.Mode().IsRegular() || runtime.GOOS != "windows" && info.Mode().Perm()&0111 == 0 {
-		return "", compat.Fail("E_SBX_NOT_INSTALLED", "SBX_PATH %q is not a regular executable", path)
+	if !executableFile(info, err) {
+		return "", compat.Fail(
+			"E_SBX_NOT_INSTALLED",
+			"SBX_PATH %q is not a regular executable",
+			path,
+		)
 	}
 	return resolved, nil
 }
+
 func Load(getenv func(string) string) (Config, error) {
 	c := Config{Getenv: getenv, Devsy: getenv("DEVSY")}
 	path, err := executable(getenv)
@@ -104,7 +132,11 @@ func Load(getenv func(string) string) (Config, error) {
 	c.SBXPath = path
 	cpus, err := strconv.Atoi(option(getenv, "SBX_CPUS", "2"))
 	if err != nil || cpus < 1 || cpus > runtime.NumCPU() {
-		return c, compat.Fail("E_CONFIG_DRIFT", "SBX_CPUS must be between 1 and %d", runtime.NumCPU())
+		return c, compat.Fail(
+			"E_CONFIG_DRIFT",
+			"SBX_CPUS must be between 1 and %d",
+			runtime.NumCPU(),
+		)
 	}
 	c.Spec.CPUs = cpus
 	for _, entry := range []struct {
@@ -112,7 +144,11 @@ func Load(getenv func(string) string) (Config, error) {
 		min          int64
 		dest         *int64
 		defaultValue string
-	}{{"SBX_MEMORY", 512 << 20, &c.Spec.MemoryBytes, "4g"}, {"SBX_ROOT_DISK", 8 << 30, &c.Spec.RootDiskBytes, "40g"}, {"SBX_DOCKER_DISK", 512 << 20, &c.Spec.DockerDiskBytes, "40g"}} {
+	}{
+		{"SBX_MEMORY", 512 << 20, &c.Spec.MemoryBytes, "4g"},
+		{"SBX_ROOT_DISK", 8 << 30, &c.Spec.RootDiskBytes, "40g"},
+		{"SBX_DOCKER_DISK", 512 << 20, &c.Spec.DockerDiskBytes, "40g"},
+	} {
 		v, e := size(option(getenv, entry.key, entry.defaultValue), entry.min)
 		if e != nil {
 			return c, compat.Fail("E_CONFIG_DRIFT", "%s: %v", entry.key, e)
@@ -124,6 +160,7 @@ func Load(getenv func(string) string) (Config, error) {
 	c.Spec.Skills = "off"
 	return c, nil
 }
+
 func LoadScoped(getenv func(string) string) (Config, error) {
 	path, e := executable(getenv)
 	if e != nil {
@@ -131,6 +168,7 @@ func LoadScoped(getenv func(string) string) (Config, error) {
 	}
 	return Config{SBXPath: path, Devsy: getenv("DEVSY"), Getenv: getenv}, nil
 }
+
 func canonical(path string) (string, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
@@ -142,8 +180,8 @@ func canonical(path string) (string, error) {
 	for {
 		resolved, e := filepath.EvalSymlinks(cur)
 		if e == nil {
-			for i := len(suffix) - 1; i >= 0; i-- {
-				resolved = filepath.Join(resolved, suffix[i])
+			for _, part := range slices.Backward(suffix) {
+				resolved = filepath.Join(resolved, part)
 			}
 			return filepath.Clean(resolved), nil
 		}
@@ -158,6 +196,7 @@ func canonical(path string) (string, error) {
 		cur = parent
 	}
 }
+
 func Key(folder string) (string, error) {
 	path, err := canonical(folder)
 	if err != nil {
@@ -173,12 +212,23 @@ func Key(folder string) (string, error) {
 	sum := sha256.Sum256(payload)
 	return hex.EncodeToString(sum[:]), nil
 }
+
 func (c Config) RequireMachine() (MachineIdentity, error) {
 	g := c.Getenv
-	m := MachineIdentity{ID: g("MACHINE_ID"), Context: g("MACHINE_CONTEXT"), Provider: g("MACHINE_PROVIDER"), ProviderID: g("PROVIDER_ID"), ProviderContext: g("PROVIDER_CONTEXT"), ProviderFolder: g("PROVIDER_FOLDER")}
+	m := MachineIdentity{
+		ID:              g("MACHINE_ID"),
+		Context:         g("MACHINE_CONTEXT"),
+		Provider:        g("MACHINE_PROVIDER"),
+		ProviderID:      g("PROVIDER_ID"),
+		ProviderContext: g("PROVIDER_CONTEXT"),
+		ProviderFolder:  g("PROVIDER_FOLDER"),
+	}
 	folder := g("MACHINE_FOLDER")
-	if folder == "" || m.ID == "" || m.Context == "" || m.Provider == "" || m.ProviderID == "" || m.ProviderContext == "" || m.ProviderFolder == "" {
-		return m, compat.Fail("E_STATE_MISSING", "required MACHINE_* or PROVIDER_* identity unavailable")
+	if !m.complete(folder) {
+		return m, compat.Fail(
+			"E_STATE_MISSING",
+			"required MACHINE_* or PROVIDER_* identity unavailable",
+		)
 	}
 	var err error
 	m.Folder, err = canonical(folder)
@@ -190,4 +240,10 @@ func (c Config) RequireMachine() (MachineIdentity, error) {
 		return m, compat.Wrap("E_STATE_MISSING", err)
 	}
 	return m, nil
+}
+
+func (m MachineIdentity) complete(folder string) bool {
+	return !slices.Contains([]string{
+		folder, m.ID, m.Context, m.Provider, m.ProviderID, m.ProviderContext, m.ProviderFolder,
+	}, "")
 }

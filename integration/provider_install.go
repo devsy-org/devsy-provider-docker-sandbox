@@ -27,7 +27,9 @@ func main() {
 
 func run() error {
 	if len(os.Args) != 4 {
-		return fmt.Errorf("usage: provider_install <devsy-executable> <artifact-directory> <release-tag>")
+		return fmt.Errorf(
+			"usage: provider_install <devsy-executable> <artifact-directory> <release-tag>",
+		)
 	}
 	devsy, directory, tag := os.Args[1], os.Args[2], os.Args[3]
 	contents, err := os.ReadFile(filepath.Join(directory, "provider.yaml"))
@@ -54,11 +56,18 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("real Devsy manifest parser: %w", err)
 	}
-	if cfg.Name != "docker-sandbox" || cfg.Version != tag || cfg.Agent.Driver != "docker" || string(cfg.Agent.Local) != "false" || !cfg.IsMachineProvider() {
+	if cfg.Name != "docker-sandbox" || cfg.Version != tag || cfg.Agent.Driver != "docker" ||
+		string(cfg.Agent.Local) != "false" ||
+		!cfg.IsMachineProvider() {
 		return fmt.Errorf("unexpected parsed provider configuration")
 	}
-	if string(cfg.Agent.Docker.Install) != "false" || string(cfg.Agent.Docker.ConfigureDaemon) != "false" || cfg.Agent.Docker.Env["DOCKER_HOST"] != "unix:///var/run/docker.sock" || cfg.Exec.Cancellation != provider.ProviderCancellationFile {
-		return fmt.Errorf("manifest lacks guest Docker ownership or cooperative cancellation policy")
+	if string(cfg.Agent.Docker.Install) != "false" ||
+		string(cfg.Agent.Docker.ConfigureDaemon) != "false" ||
+		cfg.Agent.Docker.Env["DOCKER_HOST"] != "unix:///var/run/docker.sock" ||
+		cfg.Exec.Cancellation != provider.ProviderCancellationFile {
+		return fmt.Errorf(
+			"manifest lacks guest Docker ownership or cooperative cancellation policy",
+		)
 	}
 	if len(cfg.Binaries) != 1 || len(cfg.Binaries["DOCKER_SANDBOX_PROVIDER"]) == 0 {
 		return fmt.Errorf("missing top-level executable declaration")
@@ -95,7 +104,12 @@ func run() error {
 	if originalChecksum == "" {
 		return fmt.Errorf("manifest has no native executable")
 	}
-	corrupt := bytes.Replace(contents, []byte("checksum: "+originalChecksum), []byte("checksum: "+strings.Repeat("0", 64)), 1)
+	corrupt := bytes.Replace(
+		contents,
+		[]byte("checksum: "+originalChecksum),
+		[]byte("checksum: "+strings.Repeat("0", 64)),
+		1,
+	)
 	if bytes.Equal(corrupt, contents) {
 		return fmt.Errorf("cannot construct negative checksum case")
 	}
@@ -103,14 +117,30 @@ func run() error {
 	if err := os.WriteFile(badManifest, corrupt, 0o600); err != nil {
 		return err
 	}
-	if err := install(ctx, devsy, filepath.Join(root, "bad-home"), badManifest, "sandbox-corrupt", false); err != nil {
+	if err := install(
+		ctx,
+		devsy,
+		filepath.Join(root, "bad-home"),
+		badManifest,
+		"sandbox-corrupt",
+		false,
+	); err != nil {
 		return err
 	}
 	return nil
 }
 
 func install(ctx context.Context, devsy, home, manifest, alias string, shouldSucceed bool) error {
-	command := exec.CommandContext(ctx, devsy, "provider", "add", "--use=false", "--name", alias, manifest)
+	command := exec.CommandContext(
+		ctx,
+		devsy,
+		"provider",
+		"add",
+		"--use=false",
+		"--name",
+		alias,
+		manifest,
+	)
 	command.Env = append(os.Environ(), "DEVSY_HOME="+home)
 	output, err := command.CombinedOutput()
 	if shouldSucceed && err != nil {

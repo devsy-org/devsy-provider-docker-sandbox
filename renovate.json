@@ -1,0 +1,69 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:best-practices", "helpers:pinGitHubActionDigests"],
+  "automerge": false,
+  "automergeType": "pr",
+  "automergeStrategy": "squash",
+  "dependencyDashboard": false,
+  "prConcurrentLimit": 1,
+  "platformAutomerge": true,
+  "postUpdateOptions": ["gomodTidy"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "prek hook repositories in prek.toml (Renovate has no prek manager yet)",
+      "managerFilePatterns": ["/(^|/)prek\\.toml$/"],
+      "matchStrings": [
+        "repo = \"https://github\\.com/(?<depName>[^\"]+)\"\\s+rev = \"(?<currentValue>[^\"]+)\""
+      ],
+      "datasourceTemplate": "github-tags",
+      "versioningTemplate": "loose"
+    },
+    {
+      "customType": "regex",
+      "description": "Go toolchain versions in go.mod and prek.toml",
+      "managerFilePatterns": ["/(^|/)(go\\.mod|prek\\.toml)$/"],
+      "matchStrings": [
+        "\\ngo (?<currentValue>\\d+\\.\\d+\\.\\d+)",
+        "language_version = \"(?<currentValue>\\d+\\.\\d+\\.\\d+)\""
+      ],
+      "depNameTemplate": "go",
+      "datasourceTemplate": "golang-version",
+      "versioningTemplate": "semver"
+    }
+  ],
+  "packageRules": [
+    {
+      "matchUpdateTypes": ["minor", "patch"],
+      "prPriority": 10
+    },
+    {
+      "matchManagers": ["github-actions"],
+      "automerge": true,
+      "prPriority": 5
+    },
+    {
+      "matchManagers": ["custom.regex"],
+      "matchFileNames": ["prek.toml"],
+      "automerge": true,
+      "prPriority": 4
+    },
+    {
+      "groupName": "Go toolchain",
+      "matchPackageNames": ["go", "golang/go"],
+      "allowedVersions": ">=1.26.0 <1.27.0",
+      "automerge": false,
+      "description": "keep go.mod, mise.toml, and prek.toml on the same Go 1.26 release"
+    },
+    {
+      "matchManagers": ["gomod"],
+      "automerge": true,
+      "prPriority": 3
+    },
+    {
+      "matchUpdateTypes": ["major"],
+      "automerge": false,
+      "prPriority": -1
+    }
+  ]
+}

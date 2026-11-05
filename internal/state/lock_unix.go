@@ -6,26 +6,41 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"syscall"
 	"time"
 )
 
-func protectDir(path string) error { return os.Chmod(path, 0700) }
+func protectDir(path string) error {
+	root, err := os.OpenRoot(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	return root.Chmod(filepath.Base(path), 0o700)
+}
+
 func checkDir(fi os.FileInfo) error {
-	if fi.Mode().Perm()&0077 != 0 {
+	if fi.Mode().Perm()&0o077 != 0 {
 		return errors.New("provider state directory is accessible to other users")
 	}
 	return nil
 }
+
 func checkFile(fi os.FileInfo) error {
-	if fi.Mode().Perm()&0077 != 0 {
+	if fi.Mode().Perm()&0o077 != 0 {
 		return errors.New("state file is accessible to other users")
 	}
 	return nil
 }
 func replaceFile(src, dst string) error { return os.Rename(src, dst) }
 func syncDir(path string) (err error) {
-	d, err := os.Open(path)
+	root, err := os.OpenRoot(path)
+	if err != nil {
+		return err
+	}
+	defer func() { err = errors.Join(err, root.Close()) }()
+	d, err := root.Open(".")
 	if err != nil {
 		return err
 	}
@@ -47,12 +62,29 @@ func (l *Lock) Close() error {
 	closeErr := l.file.Close()
 	return errors.Join(unlockErr, closeErr)
 }
+
 func (s Store) Acquire(ctx context.Context, name string, shared bool) (*Lock, error) {
 	if e := s.Ensure(); e != nil {
 		return nil, e
 	}
+	f, e := s.openLockFile(name)
+	if e != nil {
+		return nil, e
+	}
+	mode := syscall.LOCK_EX | syscall.LOCK_NB
+	if shared {
+		mode = syscall.LOCK_SH | syscall.LOCK_NB
+	}
+	return waitLock(ctx, f, mode)
+}
+
+func (s Store) openLockFile(name string) (*os.File, error) {
 	path := s.Dir() + string(os.PathSeparator) + name + ".lock"
-	fd, e := syscall.Open(path, syscall.O_CREAT|syscall.O_RDWR|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0600)
+	fd, e := syscall.Open(
+		path,
+		syscall.O_CREAT|syscall.O_RDWR|syscall.O_NOFOLLOW|syscall.O_CLOEXEC,
+		0o600,
+	)
 	if e != nil {
 		return nil, e
 	}
@@ -67,12 +99,12 @@ func (s Store) Acquire(ctx context.Context, name string, shared bool) (*Lock, er
 	if e = checkFile(fi); e != nil {
 		return nil, errors.Join(e, f.Close())
 	}
-	mode := syscall.LOCK_EX | syscall.LOCK_NB
-	if shared {
-		mode = syscall.LOCK_SH | syscall.LOCK_NB
-	}
+	return f, nil
+}
+
+func waitLock(ctx context.Context, f *os.File, mode int) (*Lock, error) {
 	for {
-		e = syscall.Flock(int(f.Fd()), mode)
+		e := syscall.Flock(int(f.Fd()), mode)
 		if e == nil {
 			return &Lock{f}, nil
 		}
@@ -86,6 +118,7 @@ func (s Store) Acquire(ctx context.Context, name string, shared bool) (*Lock, er
 		}
 	}
 }
+
 func (s Store) TryAcquire(name string, shared bool) (*Lock, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

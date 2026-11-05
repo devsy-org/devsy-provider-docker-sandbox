@@ -1,4 +1,4 @@
-name: Provider checks
+name: Docker Sandbox Provider
 on:
   pull_request:
   push:
@@ -6,14 +6,14 @@ on:
 permissions:
   contents: read
 jobs:
-  unit:
-    name: Unit and process tests (${{ matrix.runner }})
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 20
+  test:
+    name: Test (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
-        runner: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -23,34 +23,117 @@ jobs:
           go-version-file: go.mod
       - run: go test -race ./...
       - run: go vet ./...
-      - name: Check formatting
-        shell: bash
-        run: |
-          unformatted="$(gofmt -l cmd internal integration)"
-          if [ -n "$unformatted" ]; then
-            printf 'Unformatted files:\n%s\n' "$unformatted" >&2
-            exit 1
-          fi
       - name: Build native candidate
         shell: bash
         run: go build -o "$RUNNER_TEMP/provider${{ runner.os == 'Windows' && '.exe' || '' }}" ./cmd/devsy-provider-docker-sandbox
-  lint:
+  pre-commit:
+    name: Pre-commit
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+      - name: setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
         with:
           go-version-file: go.mod
+
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db
+      - run: mise run setup:dependencies
+      - run: prek run --all-files
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Verify generated release changes
+        if: github.event_name == 'pull_request' && github.head_ref == 'release-please--branches--main'
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          changes="$(mktemp)"
+          trap 'rm -f "$changes"' EXIT
+          git diff --name-only -z "$BASE_SHA...$HEAD_SHA" > "$changes"
+          test -s "$changes"
+          while IFS= read -r -d '' path; do
+            case "$path" in
+              .release-please-manifest.json|CHANGELOG.md) ;;
+              *) printf 'Unexpected release file: %s\n' "$path" >&2; exit 1 ;;
+            esac
+          done < "$changes"
       - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db
       - run: mise run lint
+  distribution:
+    name: Distribution
+    uses: ./.github/workflows/distribution.yml
+    with:
+      version: v0.0.0-ci
+      core_ref: ${{ vars.SBX_DISTRIBUTION_CORE_REF || '77f2b2dd8770c2d54cae9cf34c10b1c18dbb0993' }}
   ci-success:
+    name: CI Success
     if: always()
-    needs: [unit, lint]
+    needs: [test, pre-commit, lint, distribution]
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
-      - env:
+      - name: Require every validation job to pass
+        env:
           RESULTS: ${{ toJSON(needs) }}
         run: jq -e 'all(.[]; .result == "success")' <<< "$RESULTS"
+  release-please:
+    name: Release Please
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: ci-success
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: write
+    concurrency:
+      group: release-please
+      cancel-in-progress: false
+    steps:
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        id: app-token
+        with:
+          app-id: ${{ secrets.DEVSY_GITHUB_APP_ID }}
+          private-key: ${{ secrets.DEVSY_GITHUB_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7
+        id: release
+        with:
+          skip-github-release: true
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+          token: ${{ steps.app-token.outputs.token }}
+      - name: Enable release PR auto-merge
+        if: steps.release.outputs.prs_created == 'true'
+        shell: bash
+        run: |
+          release_pr="$(jq -er '
+            if length == 1 then .[0].number
+            else error("Expected exactly one release PR") end
+            | select(type == "number" and . > 0 and . == floor)
+          ' <<< "$RELEASE_PRS")"
+          release_head="$(gh pr view "$release_pr" --json headRefOid --jq .headRefOid)"
+          behind="$(gh api "repos/$GH_REPO/compare/main...$release_head" --jq .behind_by)"
+          if [[ "$behind" -gt 0 ]]; then
+            gh pr update-branch "$release_pr"
+            release_head="$(gh pr view "$release_pr" --json headRefOid --jq .headRefOid)"
+          fi
+          release_title="$(gh pr view "$release_pr" --json title --jq .title)"
+          gh pr merge --auto --squash --subject "$release_title" --body '' \
+            --match-head-commit "$release_head" "$release_pr"
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_PRS: ${{ steps.release.outputs.prs }}

@@ -3,9 +3,10 @@ package provider
 import (
 	"context"
 	"errors"
+	"time"
+
 	"github.com/devsy-org/devsy-provider-docker-sandbox/internal/compat"
 	"github.com/devsy-org/devsy-provider-docker-sandbox/internal/state"
-	"time"
 )
 
 func (p Provider) Start(ctx context.Context) (result error) {
@@ -34,6 +35,16 @@ func (p Provider) Start(ctx context.Context) (result error) {
 	}
 	return p.startLocked(ctx, &r)
 }
+
+func (p Provider) readinessWithSession(ctx context.Context, r *state.Record) (result error) {
+	sessions, e := p.Store.Acquire(ctx, "sessions", true)
+	if e != nil {
+		return e
+	}
+	defer func() { result = errors.Join(result, closeLock(sessions)) }()
+	return p.readiness(ctx, r)
+}
+
 func (p Provider) startLocked(ctx context.Context, r *state.Record) (result error) {
 	if r.SandboxID == "" {
 		return compat.Fail("E_STATE_MISSING", "machine backend ID has never been recorded")
@@ -42,28 +53,28 @@ func (p Provider) startLocked(ctx context.Context, r *state.Record) (result erro
 	if e != nil {
 		return e
 	}
-	if r.Phase == "ready" && r.DesiredState == "running" && r.Operation == nil && p.Profile.InventoryStates[item.State] == "running" {
-		sessions, e := p.Store.Acquire(ctx, "sessions", true)
-		if e != nil {
-			return e
-		}
-		defer func() { result = errors.Join(result, closeLock(sessions)) }()
-		return p.readiness(ctx, r)
+	if r.Phase == phaseReady && r.DesiredState == stateRunning && r.Operation == nil &&
+		p.Profile.InventoryStates[item.State] == stateRunning {
+		return p.readinessWithSession(ctx, r)
 	}
-	sessions, e := p.begin(ctx, r, "starting", "running", "start", "run")
+	sessions, e := p.begin(ctx, r, transition{phaseStarting, stateRunning, "start", stepRun})
 	if e != nil {
 		return e
 	}
 	defer func() { result = errors.Join(result, closeLock(sessions)) }()
-	item, e = p.ensureIdentity(ctx, *r)
+	return p.startAfterBegin(ctx, r)
+}
+
+func (p Provider) startAfterBegin(ctx context.Context, r *state.Record) error {
+	item, e := p.ensureIdentity(ctx, *r)
 	if e != nil {
 		return p.failWithStep(r, e)
 	}
-	if p.Profile.InventoryStates[item.State] == "running" {
+	if p.Profile.InventoryStates[item.State] == stateRunning {
 		if e = p.readiness(ctx, r); e != nil {
 			return p.failWithStep(r, e)
 		}
-		return p.successful(r, "ready", "running")
+		return p.successful(r, phaseReady, stateRunning)
 	}
 	return p.runReady(ctx, r)
 }

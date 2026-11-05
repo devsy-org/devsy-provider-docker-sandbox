@@ -31,7 +31,20 @@ func exerciseNativeTransport(t *testing.T, h *nativeHarness, id string) {
 		}
 	})
 	t.Run("independent stderr", func(t *testing.T) {
-		command := exec.CommandContext(h.ctx, h.devsy, "--no-status", "--result-format", "plain", "workspace", "exec", id, "--", "sh", "-c", "printf out; printf err >&2")
+		command := exec.CommandContext(
+			h.ctx,
+			h.devsy,
+			"--no-status",
+			"--result-format",
+			"plain",
+			"workspace",
+			"exec",
+			id,
+			"--",
+			"sh",
+			"-c",
+			"printf out; printf err >&2",
+		)
 		command.Env = append(os.Environ(), "DEVSY_HOME="+h.home)
 		var stdout, stderr bytes.Buffer
 		command.Stdout, command.Stderr = &stdout, &stderr
@@ -44,7 +57,18 @@ func exerciseNativeTransport(t *testing.T, h *nativeHarness, id string) {
 	})
 	t.Run("guest exit codes", func(t *testing.T) {
 		for _, code := range []int{0, 7, 125, 127} {
-			command := exec.CommandContext(h.ctx, h.devsy, "--no-status", "workspace", "exec", id, "--", "sh", "-c", fmt.Sprintf("exit %d", code))
+			command := exec.CommandContext(
+				h.ctx,
+				h.devsy,
+				"--no-status",
+				"workspace",
+				"exec",
+				id,
+				"--",
+				"sh",
+				"-c",
+				fmt.Sprintf("exit %d", code),
+			)
 			command.Env = append(os.Environ(), "DEVSY_HOME="+h.home)
 			err := command.Run()
 			if code == 0 {
@@ -66,7 +90,18 @@ func exerciseNativeTransport(t *testing.T, h *nativeHarness, id string) {
 			group.Add(1)
 			go func() {
 				defer group.Done()
-				command := exec.CommandContext(h.ctx, h.devsy, "--no-status", "workspace", "exec", id, "--", "sh", "-c", fmt.Sprintf("sleep 2; printf '%d'", index))
+				command := exec.CommandContext(
+					h.ctx,
+					h.devsy,
+					"--no-status",
+					"workspace",
+					"exec",
+					id,
+					"--",
+					"sh",
+					"-c",
+					fmt.Sprintf("sleep 2; printf '%d'", index),
+				)
 				command.Env = append(os.Environ(), "DEVSY_HOME="+h.home)
 				output, err := command.Output()
 				if err == nil && string(output) != fmt.Sprintf("%d", index) {
@@ -88,7 +123,13 @@ func exerciseNativeTransport(t *testing.T, h *nativeHarness, id string) {
 	})
 }
 
-func guestCommand(t *testing.T, h *nativeHarness, id string, input []byte, arguments ...string) []byte {
+func guestCommand(
+	t *testing.T,
+	h *nativeHarness,
+	id string,
+	input []byte,
+	arguments ...string,
+) []byte {
 	t.Helper()
 	args := append([]string{"--no-status", "workspace", "exec", id, "--"}, arguments...)
 	command := exec.CommandContext(h.ctx, h.devsy, args...)
@@ -119,7 +160,13 @@ func exerciseNativeCancellation(t *testing.T, h *nativeHarness, id string) {
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
-		cleanup := fmt.Sprintf("sh -c 'if test -s %s; then read pid < %s; kill \"$pid\" 2>/dev/null || true; fi; rm -f %s %s'", unrelated, unrelated, unrelated, target)
+		cleanup := fmt.Sprintf(
+			"sh -c 'if test -s %s; then read pid < %s; kill \"$pid\" 2>/dev/null || true; fi; rm -f %s %s'",
+			unrelated,
+			unrelated,
+			unrelated,
+			target,
+		)
 		if err := nativeGuestRun(ctx, h, helper, id, cleanup); err != nil {
 			t.Errorf("scoped guest session cleanup failed: %v", err)
 		}
@@ -138,9 +185,23 @@ func exerciseNativeCancellation(t *testing.T, h *nativeHarness, id string) {
 			t.Logf("unrelated session stderr: %s", otherStderr.String())
 		}
 	})
-	waitForNativeGuest(t, h, helper, id, fmt.Sprintf("sh -c 'test -s %s && read pid < %s && kill -0 \"$pid\"'", unrelated, unrelated), 3*time.Minute)
+	waitForNativeGuest(
+		t,
+		h,
+		helper,
+		id,
+		fmt.Sprintf(
+			"sh -c 'test -s %s && read pid < %s && kill -0 \"$pid\"'",
+			unrelated,
+			unrelated,
+		),
+		3*time.Minute,
+	)
 
-	targetScript := fmt.Sprintf("sh -c 'sleep 300 & child=$!; printf \"%%s %%s\\n\" \"$$\" \"$child\" > %s; wait \"$child\"'", target)
+	targetScript := fmt.Sprintf(
+		"sh -c 'sleep 300 & child=$!; printf \"%%s %%s\\n\" \"$$\" \"$child\" > %s; wait \"$child\"'",
+		target,
+	)
 	command := exec.CommandContext(h.ctx, helper, "cancel", id, targetScript, h.devsy)
 	command.Env = append(os.Environ(), "DEVSY_HOME="+h.home)
 	command.Stdout = io.Discard
@@ -170,7 +231,18 @@ func exerciseNativeCancellation(t *testing.T, h *nativeHarness, id string) {
 			t.Errorf("target cancellation cleanup failed: %v: %s", err, commandStderr.String())
 		}
 	})
-	waitForNativeGuest(t, h, helper, id, fmt.Sprintf("sh -c 'test -s %s && read parent child < %s && kill -0 \"$parent\" && kill -0 \"$child\"'", target, target), 3*time.Minute)
+	waitForNativeGuest(
+		t,
+		h,
+		helper,
+		id,
+		fmt.Sprintf(
+			"sh -c 'test -s %s && read parent child < %s && kill -0 \"$parent\" && kill -0 \"$child\"'",
+			target,
+			target,
+		),
+		3*time.Minute,
+	)
 	if _, err := stdin.Write([]byte{'\n'}); err != nil {
 		t.Fatal(err)
 	}
@@ -181,12 +253,29 @@ func exerciseNativeCancellation(t *testing.T, h *nativeHarness, id string) {
 	err = command.Wait()
 	waited = true
 	if err != nil {
-		t.Fatalf("Devsy did not finish cooperative cancellation: %v: %s", err, commandStderr.String())
+		t.Fatalf(
+			"Devsy did not finish cooperative cancellation: %v: %s",
+			err,
+			commandStderr.String(),
+		)
 	}
-	exited := fmt.Sprintf("sh -c 'read parent child < %s; for pid in \"$parent\" \"$child\"; do state=$(ps -o stat= -p \"$pid\" 2>/dev/null || true); case \"$state\" in \"\"|*Z*) ;; *) exit 1;; esac; done'", target)
+	exited := fmt.Sprintf(
+		"sh -c 'read parent child < %s; for pid in \"$parent\" \"$child\"; do state=$(ps -o stat= -p \"$pid\" 2>/dev/null || true); case \"$state\" in \"\"|*Z*) ;; *) exit 1;; esac; done'",
+		target,
+	)
 	waitForNativeGuest(t, h, helper, id, exited, 2*time.Minute)
-	if err := nativeGuestRun(h.ctx, h, helper, id, fmt.Sprintf("sh -c 'read pid < %s && kill -0 \"$pid\"'", unrelated)); err != nil {
-		t.Fatalf("unrelated admitted guest session did not survive: %v: %s", err, otherStderr.String())
+	if err := nativeGuestRun(
+		h.ctx,
+		h,
+		helper,
+		id,
+		fmt.Sprintf("sh -c 'read pid < %s && kill -0 \"$pid\"'", unrelated),
+	); err != nil {
+		t.Fatalf(
+			"unrelated admitted guest session did not survive: %v: %s",
+			err,
+			otherStderr.String(),
+		)
 	}
 	if got := guestCommand(t, h, id, nil, "printf", "survived"); string(got) != "survived" {
 		t.Fatalf("VM stopped after cancellation: %q", got)
@@ -201,7 +290,12 @@ func nativeGuestRun(ctx context.Context, h *nativeHarness, helper, id, script st
 	return command.Run()
 }
 
-func waitForNativeGuest(t *testing.T, h *nativeHarness, helper, id, script string, timeout time.Duration) {
+func waitForNativeGuest(
+	t *testing.T,
+	h *nativeHarness,
+	helper, id, script string,
+	timeout time.Duration,
+) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(h.ctx, timeout)
 	defer cancel()

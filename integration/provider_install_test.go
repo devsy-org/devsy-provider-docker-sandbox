@@ -22,7 +22,15 @@ func TestNativeProviderInstallation(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	command := exec.CommandContext(ctx, "go", "run", filepath.Join(root, "provider_install.go"), devsy, directory, version)
+	command := exec.CommandContext(
+		ctx,
+		"go",
+		"run",
+		filepath.Join(root, "provider_install.go"),
+		devsy,
+		directory,
+		version,
+	)
 	command.Dir = coreSource
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("native alias and checksum installation failed: %v: %s", err, output)

@@ -3,6 +3,7 @@ package state
 import (
 	"crypto/rand"
 	"encoding/hex"
+
 	"github.com/devsy-org/devsy-provider-docker-sandbox/internal/config"
 )
 
@@ -21,6 +22,7 @@ func Root() (string, error) {
 	}
 	return base, nil
 }
+
 func New(identity config.MachineIdentity, spec config.Spec) (Record, error) {
 	token, err := Token()
 	if err != nil {
@@ -31,5 +33,22 @@ func New(identity config.MachineIdentity, spec config.Spec) (Record, error) {
 		return Record{}, err
 	}
 	now := nowUTC()
-	return Record{SchemaVersion: 1, MachineKey: identity.Key, MachineFolder: identity.Folder, MachineID: identity.ID, Context: identity.Context, ProviderFamily: config.Family, ProviderAlias: identity.Provider, SandboxName: Name(identity.Key, token), Generation: token, Epoch: 1, Phase: "creating", DesiredState: "running", Operation: &Operation{ID: op, Kind: "create", Phase: "active", Step: "create"}, Spec: spec, CreatedAt: now, UpdatedAt: now}, nil
+	return Record{
+		SchemaVersion:  1,
+		MachineKey:     identity.Key,
+		MachineFolder:  identity.Folder,
+		MachineID:      identity.ID,
+		Context:        identity.Context,
+		ProviderFamily: config.Family,
+		ProviderAlias:  identity.Provider,
+		SandboxName:    Name(identity.Key, token),
+		Generation:     token,
+		Epoch:          1,
+		Phase:          "creating",
+		DesiredState:   "running",
+		Operation:      &Operation{ID: op, Kind: "create", Phase: "active", Step: "create"},
+		Spec:           spec,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}, nil
 }
