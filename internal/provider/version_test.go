@@ -33,6 +33,7 @@ type versionBackend struct {
 	removed    *bool
 	lenient    *[]bool
 	output     string
+	stopState  string
 	executable string
 	store      state.Store
 }
@@ -79,6 +80,9 @@ func (b versionBackend) Start(
 	switch request.Args[0] {
 	case "stop":
 		*b.state = testUnitStopped
+		if b.stopState != "" {
+			*b.state = b.stopState
+		}
 	case "rm":
 		*b.removed = true
 	}

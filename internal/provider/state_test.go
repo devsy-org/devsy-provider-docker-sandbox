@@ -2,16 +2,21 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/devsy-org/devsy-provider-docker-sandbox/internal/compat"
 	"github.com/devsy-org/devsy-provider-docker-sandbox/internal/config"
 	"github.com/devsy-org/devsy-provider-docker-sandbox/internal/state"
 )
 
-const testPausedState = "unit-paused"
+const (
+	testPausedState  = "unit-paused"
+	testRestingState = "unit-resting"
+)
 
 func unknownStateFixture(t *testing.T) versionFixture {
 	t.Helper()
@@ -25,7 +30,6 @@ func requireOneStateWarning(t *testing.T, f versionFixture) {
 	text := f.warned.String()
 	for _, want := range []string{
 		"warning: sandbox state \"" + testPausedState + "\" is not recognized",
-		"verifies the result from the inventory",
 		compat.IssuesURL,
 	} {
 		if !strings.Contains(text, want) {
@@ -60,20 +64,67 @@ func TestStopStillRequiresIdentityOnUnrecognizedState(t *testing.T) {
 	}
 }
 
-func TestNotRunningAcceptsStoppedAndUnrecognizedStates(t *testing.T) {
+func TestStopSettledRule(t *testing.T) {
 	p := Provider{Profile: versionProfile(t, true)}
-	for backendState, want := range map[string]bool{
-		testUnitStopped: true,
-		testPausedState: true,
-		testUnitRunning: false,
+	for _, test := range []struct {
+		name, before, current string
+		want                  bool
+	}{
+		{"stopped from running", testUnitRunning, testUnitStopped, true},
+		{"stopped from unlisted", testPausedState, testUnitStopped, true},
+		{"still running", testUnitRunning, testUnitRunning, false},
+		{"same unlisted state", testPausedState, testPausedState, false},
+		{"different unlisted state", testPausedState, testRestingState, true},
+		{"unlisted state from running", testUnitRunning, testPausedState, true},
 	} {
-		if got := p.notRunning(backendState); got != want {
-			t.Fatalf("notRunning(%q) = %t", backendState, got)
+		t.Run(test.name, func(t *testing.T) {
+			if got := p.stopSettled(test.before, test.current); got != test.want {
+				t.Fatalf("stopSettled(%q, %q) = %t", test.before, test.current, got)
+			}
+		})
+	}
+	p.Profile.InventoryStates[testRestingState] = stateTransitional
+	if p.stopSettled(testPausedState, testRestingState) {
+		t.Fatal("transitional state treated as stopped")
+	}
+}
+
+func TestStopWaitsWhileUnlistedStateIsUnchanged(t *testing.T) {
+	f := unknownStateFixture(t).withExactResult("stopped")
+	f.backend.stopState = testPausedState
+	f.p.Backend = f.backend
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	err := f.p.Stop(ctx)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("stop error = %v, want the wait to time out", err)
+	}
+	stored, loadErr := f.p.Store.Load()
+	requireNoError(t, loadErr)
+	if stored.Phase == stateStopped || stored.Operation == nil ||
+		stored.Operation.Phase != phaseUncertain {
+		t.Fatalf("unverified stop recorded %+v", stored)
+	}
+}
+
+func TestStopCompletesWhenUnlistedStateChanges(t *testing.T) {
+	f := unknownStateFixture(t).withExactResult("stopped")
+	f.backend.stopState = testRestingState
+	f.p.Backend = f.backend
+	requireNoError(t, f.p.Stop(context.Background()))
+	stored, err := f.p.Store.Load()
+	requireNoError(t, err)
+	if stored.Phase != stateStopped || stored.Operation != nil {
+		t.Fatalf("stop recorded %+v", stored)
+	}
+	text := f.warned.String()
+	for _, unlisted := range []string{testPausedState, testRestingState} {
+		if !strings.Contains(text, "sandbox state \""+unlisted+"\" is not recognized") {
+			t.Fatalf("warnings %q lack state %s", text, unlisted)
 		}
 	}
-	p.Profile.InventoryStates[testPausedState] = stateTransitional
-	if p.notRunning(testPausedState) {
-		t.Fatal("transitional state treated as not running")
+	if strings.Count(text, "warning:") != 2 {
+		t.Fatalf("expected one warning per unlisted state: %q", text)
 	}
 }
 

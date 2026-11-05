@@ -217,8 +217,8 @@ func (p Provider) inventoryKind(backendState string, tolerate bool) (string, err
 
 func unrecognizedStateWarning(backendState string) string {
 	return fmt.Sprintf(
-		"sandbox state %q is not recognized by this provider, so it proceeds best effort and "+
-			"verifies the result from the inventory; please file an issue at %s",
+		"sandbox state %q is not recognized by this provider, so it proceeds best effort without "+
+			"being able to classify that state; please file an issue at %s",
 		backendState,
 		compat.IssuesURL,
 	)
