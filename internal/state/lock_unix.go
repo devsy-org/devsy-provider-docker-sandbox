@@ -20,14 +20,14 @@ func protectDir(path string) error {
 	return root.Chmod(filepath.Base(path), 0o700)
 }
 
-func checkDir(fi os.FileInfo) error {
+func checkDir(_ string, fi os.FileInfo) error {
 	if fi.Mode().Perm()&0o077 != 0 {
 		return errors.New("provider state directory is accessible to other users")
 	}
 	return nil
 }
 
-func checkFile(fi os.FileInfo) error {
+func checkFile(_ string, fi os.FileInfo) error {
 	if fi.Mode().Perm()&0o077 != 0 {
 		return errors.New("state file is accessible to other users")
 	}
@@ -96,7 +96,7 @@ func (s Store) openLockFile(name string) (*os.File, error) {
 	if !fi.Mode().IsRegular() {
 		return nil, errors.Join(errors.New("unsafe lock file"), f.Close())
 	}
-	if e = checkFile(fi); e != nil {
+	if e = checkFile(path, fi); e != nil {
 		return nil, errors.Join(e, f.Close())
 	}
 	return f, nil
@@ -124,3 +124,9 @@ func (s Store) TryAcquire(name string, shared bool) (*Lock, error) {
 	cancel()
 	return s.Acquire(ctx, name, shared)
 }
+
+func makeStateDir(path string) error               { return os.Mkdir(path, 0o700) }
+func createStateTemp(dir string) (*os.File, error) { return os.CreateTemp(dir, ".atomic-") }
+
+func checkOpenedStateFile(file *os.File, fi os.FileInfo) error { return checkFile(file.Name(), fi) }
+func createStateTempDir(dir string) (string, error)            { return os.MkdirTemp(dir, "call-") }

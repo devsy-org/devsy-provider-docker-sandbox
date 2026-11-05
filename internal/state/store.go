@@ -135,7 +135,7 @@ func ensureStateDirParent(path string, statErr error) error {
 		if parent == path {
 			return statErr
 		}
-		if e := os.Mkdir(path, 0o700); e != nil && !os.IsExist(e) {
+		if e := makeStateDir(path); e != nil && !os.IsExist(e) {
 			return e
 		}
 	}
@@ -162,7 +162,7 @@ func checkPrivateDir(path string) error {
 		return fmt.Errorf("state directory is not a real directory: %s", path)
 	}
 	if ownedStatePath(path) {
-		if e := checkDir(fi); e != nil {
+		if e := checkDir(path, fi); e != nil {
 			return e
 		}
 		return protectDir(path)
@@ -202,6 +202,9 @@ func readFile(path string) ([]byte, error) {
 	if e := checkStateFile(path, opened); e != nil {
 		return nil, e
 	}
+	if e := checkOpenedStateFile(file, opened); e != nil {
+		return nil, e
+	}
 	return io.ReadAll(file)
 }
 
@@ -209,7 +212,7 @@ func checkStateFile(path string, fi os.FileInfo) error {
 	if !fi.Mode().IsRegular() || fi.Mode()&os.ModeSymlink != 0 || fi.Size() > 16<<20 {
 		return compat.Fail("E_STORAGE", "unsafe or oversized state file %s", path)
 	}
-	if e := checkFile(fi); e != nil {
+	if e := checkFile(path, fi); e != nil {
 		return compat.Wrap("E_STORAGE", e)
 	}
 	return nil
@@ -251,7 +254,7 @@ func save(path string, v any) (result error) {
 	if err = privateDir(dir); err != nil {
 		return err
 	}
-	f, err := os.CreateTemp(dir, ".atomic-")
+	f, err := createStateTemp(dir)
 	if err != nil {
 		return err
 	}
@@ -355,7 +358,7 @@ func (s Store) ControlCWD() (string, func() error, error) {
 	if err := privateDir(dir); err != nil {
 		return "", nil, compat.Wrap("E_STORAGE", err)
 	}
-	path, err := os.MkdirTemp(dir, "call-")
+	path, err := createStateTempDir(dir)
 	if err != nil {
 		return "", nil, compat.Wrap("E_STORAGE", err)
 	}
@@ -404,7 +407,7 @@ func (s Store) ReadAttempt(id string) (Attempt, error) {
 func (s Store) readAttemptEntry(entry os.DirEntry) (Attempt, bool, error) {
 	if strings.HasPrefix(entry.Name(), ".atomic-") && len(entry.Name()) > len(".atomic-") &&
 		!strings.HasSuffix(entry.Name(), ".json") {
-		return readAttemptTemp(entry)
+		return readAttemptTemp(filepath.Join(s.Dir(), "attempts", entry.Name()), entry)
 	}
 	if !strings.HasSuffix(entry.Name(), ".json") {
 		return Attempt{}, false, compat.Fail("E_STORAGE", "unexpected attempt file")
@@ -423,7 +426,7 @@ func (s Store) readAttemptEntry(entry os.DirEntry) (Attempt, bool, error) {
 	return a, false, nil
 }
 
-func readAttemptTemp(entry os.DirEntry) (Attempt, bool, error) {
+func readAttemptTemp(path string, entry os.DirEntry) (Attempt, bool, error) {
 	fi, e := entry.Info()
 	if errors.Is(e, os.ErrNotExist) {
 		return Attempt{}, true, nil
@@ -434,7 +437,7 @@ func readAttemptTemp(entry os.DirEntry) (Attempt, bool, error) {
 	if !fi.Mode().IsRegular() || fi.Mode()&os.ModeSymlink != 0 || fi.Size() > 16<<20 {
 		return Attempt{}, false, compat.Fail("E_STORAGE", "unsafe attempt temp file")
 	}
-	if e := checkFile(fi); e != nil {
+	if e := checkFile(path, fi); e != nil {
 		return Attempt{}, false, compat.Wrap("E_STORAGE", e)
 	}
 	return Attempt{}, true, nil
