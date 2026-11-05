@@ -5,6 +5,7 @@
   "packages": {
     ".": {
       "initial-version": "0.1.0",
+      "release-as": "1.0.0",
       "include-component-in-tag": false,
       "changelog-path": "CHANGELOG.md",
       "bump-minor-pre-major": true,
