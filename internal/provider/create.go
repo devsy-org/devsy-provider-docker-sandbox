@@ -12,9 +12,17 @@ import (
 	"github.com/devsy-org/devsy-provider-docker-sandbox/internal/state"
 )
 
-func (p Provider) Create(ctx context.Context) (result error) {
+func (p Provider) Create(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
+	bound, e := p.live(ctx, true)
+	if e != nil {
+		return e
+	}
+	return bound.create(ctx)
+}
+
+func (p Provider) create(ctx context.Context) (result error) {
 	creationCompatibility, e := p.createCompatibility(ctx)
 	if e != nil {
 		return e
@@ -32,9 +40,6 @@ func (p Provider) Create(ctx context.Context) (result error) {
 }
 
 func (p Provider) createCompatibility(ctx context.Context) (state.Compatibility, error) {
-	if e := p.live(ctx, true); e != nil {
-		return state.Compatibility{}, e
-	}
 	if e := p.Profile.RequireDiskSizingQualification(); e != nil {
 		return state.Compatibility{}, e
 	}
@@ -42,7 +47,7 @@ func (p Provider) createCompatibility(ctx context.Context) (state.Compatibility,
 	if e != nil {
 		return state.Compatibility{}, e
 	}
-	daemon, e := sbx.ServerVersion(current, p.Profile)
+	daemon, e := sbx.DaemonVersion(current, p.Profile)
 	if e != nil {
 		return state.Compatibility{}, e
 	}
@@ -224,7 +229,7 @@ func (p Provider) prepareCreateSubmission(ctx context.Context, r *state.Record) 
 	if r.Operation != nil && r.Operation.LastAttemptID != "" {
 		return p.markPriorCreateUncertain(r)
 	}
-	if e := p.Backend.ShellSettings(ctx, p.Profile); e != nil {
+	if e := p.Backend.ShellSettings(ctx, p.Profile, p.lenient); e != nil {
 		return e
 	}
 	if r.Operation == nil {

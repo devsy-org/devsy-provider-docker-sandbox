@@ -15,41 +15,59 @@ import (
 
 const (
 	unqualified = "unqualified"
+	errArtifact = "artifact"
 	darwinHost  = "darwin/arm64"
 	sbxVersion  = "v0.50.1"
 )
 
-func TestGenerateUsesActualBytesAndQualifiedHosts(t *testing.T) {
+var artifactNames = map[string]string{
+	"linux/amd64":   "devsy-provider-docker-sandbox-linux-amd64",
+	"linux/arm64":   "devsy-provider-docker-sandbox-linux-arm64",
+	"darwin/arm64":  "devsy-provider-docker-sandbox-darwin-arm64",
+	"windows/amd64": "devsy-provider-docker-sandbox-windows-amd64.exe",
+}
+
+func writeArtifacts(t *testing.T, directory string, skip string) map[string][]byte {
+	t.Helper()
+	contents := make(map[string][]byte, len(artifactNames))
+	for host, name := range artifactNames {
+		if host == skip {
+			continue
+		}
+		contents[host] = []byte("synthetic executable " + host)
+		if err := os.WriteFile(filepath.Join(directory, name), contents[host], 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return contents
+}
+
+func TestGenerateEmitsAllHostsWithActualBytes(t *testing.T) {
 	directory := t.TempDir()
 	profilePath := filepath.Join(directory, "profile.json")
-	p := qualifiedProfile()
-	writeProfile(t, profilePath, p)
-	darwin := []byte("synthetic executable")
-	if err := os.WriteFile(
-		filepath.Join(directory, "devsy-provider-docker-sandbox-darwin-arm64"),
-		darwin,
-		0o600,
-	); err != nil {
-		t.Fatal(err)
-	}
+	writeProfile(t, profilePath, qualifiedProfile())
+	contents := writeArtifacts(t, directory, "")
 	metadata, err := Generate("v1.2.3", directory, profilePath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	checkGeneratedMetadata(t, metadata, darwin, directory)
+	checkGeneratedMetadata(t, metadata, contents, directory)
 }
 
-func checkGeneratedMetadata(t *testing.T, metadata Metadata, darwin []byte, directory string) {
+func checkGeneratedMetadata(
+	t *testing.T,
+	metadata Metadata,
+	contents map[string][]byte,
+	directory string,
+) {
 	t.Helper()
-	checksum := fmt.Sprintf("%x", sha256.Sum256(darwin))
-	if !strings.Contains(string(metadata.Manifest), "checksum: "+checksum) ||
-		!strings.Contains(string(metadata.Checksums), checksum) {
-		t.Fatalf("manifest or checksum file lacks actual executable checksum %s", checksum)
-	}
-	if !strings.Contains(string(metadata.Manifest), "-darwin-arm64") ||
-		strings.Contains(string(metadata.Manifest), "-linux-amd64") ||
-		strings.Contains(string(metadata.Manifest), "-windows-amd64") {
-		t.Fatal("manifest includes an unqualified host or omits the qualified Mac")
+	for host, name := range artifactNames {
+		checksum := fmt.Sprintf("%x", sha256.Sum256(contents[host]))
+		if !strings.Contains(string(metadata.Manifest), "checksum: "+checksum) ||
+			!strings.Contains(string(metadata.Checksums), checksum+"  "+name+"\n") ||
+			!strings.Contains(string(metadata.Manifest), "name: "+name+"\n") {
+			t.Fatalf("manifest or checksum file lacks %s checksum %s", host, checksum)
+		}
 	}
 	checkManifestFields(t, metadata.Manifest)
 	profileBytes, err := fs.ReadFile(os.DirFS(directory), "profile.json")
@@ -74,30 +92,37 @@ func TestGenerateRejectsIncompleteRelease(t *testing.T) {
 	for _, tt := range []struct {
 		name    string
 		mutate  func(*profile)
-		art     []byte
+		skip    string
+		empty   bool
 		wantErr string
 	}{
-		{"no host", func(p *profile) { p.QualifiedHosts = nil }, nil, "no qualified native hosts"},
-		{"no daemon schema", func(p *profile) { p.DaemonSchema = "" }, nil, unqualified},
-		{"no operation result schema", func(p *profile) { p.OperationResultSchema = "" }, nil, unqualified},
-		{"missing disk sizing schema", func(p *profile) { p.DiskSizingSchemas = nil }, nil, "unqualified disk sizing"},
+		{"no host", func(p *profile) { p.QualifiedHosts = nil }, "", false, "no qualified native hosts"},
+		{"no daemon schema", func(p *profile) { p.DaemonSchema = "" }, "", false, unqualified},
+		{"no operation result schema", func(p *profile) { p.OperationResultSchema = "" }, "", false, unqualified},
+		{"missing disk sizing schema", func(p *profile) { p.DiskSizingSchemas = nil }, "", false, "unqualified disk sizing"},
 		{"unmeasured disk sizing schema", func(p *profile) {
 			p.DiskSizingSchemas[darwinHost] = "unmeasured"
-		}, nil, "unqualified disk sizing"},
-		{"no core version", func(p *profile) { p.MinimumDevsyVersion = "" }, nil, unqualified},
+		}, "", false, "unqualified disk sizing"},
+		{"disk sizing schema for unqualified host", func(p *profile) {
+			p.DiskSizingSchemas["linux/amd64"] = "unmeasured"
+		}, "", false, "not in qualified_hosts"},
+		{"no core version", func(p *profile) { p.MinimumDevsyVersion = "" }, "", false, unqualified},
 		{"missing client revision", func(p *profile) {
 			p.QualifiedSBXRevisions[sbxVersion] = ""
-		}, nil, "no measured revision"},
+		}, "", false, "no measured revision"},
 		{"missing daemon version", func(p *profile) {
 			p.QualifiedDaemonVersions[sbxVersion] = nil
-		}, nil, "no measured daemon versions"},
-		{"missing state", func(p *profile) { delete(p.InventoryStates, "running") }, nil, "running and stopped"},
-		{"unknown host", func(p *profile) { p.QualifiedHosts = []string{"darwin/amd64"} }, nil, "unsupported"},
+		}, "", false, "no measured daemon versions"},
+		{"missing state", func(p *profile) { delete(p.InventoryStates, "running") }, "", false, "running and stopped"},
+		{"unknown host", func(p *profile) { p.QualifiedHosts = []string{"darwin/amd64"} }, "", false, "unsupported"},
 		{"duplicate host", func(p *profile) {
 			p.QualifiedHosts = []string{darwinHost, darwinHost}
-		}, []byte("synthetic executable"), "duplicate"},
-		{"missing artifact", func(*profile) {}, nil, "artifact"},
-		{"empty artifact", func(*profile) {}, []byte{}, "nonempty regular"},
+		}, "", false, "duplicate"},
+		{"missing linux amd64 artifact", func(*profile) {}, "linux/amd64", false, errArtifact},
+		{"missing linux arm64 artifact", func(*profile) {}, "linux/arm64", false, errArtifact},
+		{"missing darwin arm64 artifact", func(*profile) {}, darwinHost, false, errArtifact},
+		{"missing windows amd64 artifact", func(*profile) {}, "windows/amd64", false, errArtifact},
+		{"empty artifact", func(*profile) {}, "", true, "nonempty regular"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			directory := t.TempDir()
@@ -105,10 +130,11 @@ func TestGenerateRejectsIncompleteRelease(t *testing.T) {
 			p := qualifiedProfile()
 			tt.mutate(&p)
 			writeProfile(t, path, p)
-			if tt.art != nil {
+			writeArtifacts(t, directory, tt.skip)
+			if tt.empty {
 				if err := os.WriteFile(
-					filepath.Join(directory, "devsy-provider-docker-sandbox-darwin-arm64"),
-					tt.art,
+					filepath.Join(directory, artifactNames["windows/amd64"]),
+					nil,
 					0o600,
 				); err != nil {
 					t.Fatal(err)

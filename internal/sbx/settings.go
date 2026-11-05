@@ -7,16 +7,25 @@ import (
 	"github.com/devsy-org/devsy-provider-docker-sandbox/internal/compat"
 )
 
-func checkShellSetting(data []byte) error {
-	fields, err := stringFields(data, "default", "description", "key", "source", "type", "value")
+const shellDefault = "default"
+
+func shellSettingFields(lenient bool) []string {
+	if lenient {
+		return []string{shellDefault, "key", "source", "type", "value"}
+	}
+	return []string{shellDefault, "description", "key", "source", "type", "value"}
+}
+
+func checkShellSetting(data []byte, lenient bool) error {
+	fields, err := stringFields(data, lenient, shellSettingFields(lenient)...)
 	if err != nil {
 		return compat.Fail("E_SBX_SCHEMA", "invalid effective shell setting JSON: %v", err)
 	}
 	if fields["key"] != "kit.shortcuts.shell" || fields["type"] != "string" ||
-		fields["default"] != "" {
+		fields[shellDefault] != "" {
 		return compat.Fail("E_SBX_SCHEMA", "unrecognized effective shell setting schema")
 	}
-	if fields["source"] != "default" || fields["value"] != "" {
+	if fields["source"] != shellDefault || fields["value"] != "" {
 		return compat.Fail(
 			"E_SHELL_OVERRIDE",
 			"effective shell shortcut setting is not the qualified empty default",
@@ -25,7 +34,7 @@ func checkShellSetting(data []byte) error {
 	return nil
 }
 
-func (c Client) ShellSettings(ctx context.Context, p compat.Profile) error {
+func (c Client) ShellSettings(ctx context.Context, p compat.Profile, lenient bool) error {
 	if e := p.RequireShellSchema(); e != nil {
 		return e
 	}
@@ -38,5 +47,5 @@ func (c Client) ShellSettings(ctx context.Context, p compat.Profile) error {
 	if e != nil {
 		return compat.Wrap("E_SBX_UNAVAILABLE", e)
 	}
-	return checkShellSetting(data)
+	return checkShellSetting(data, lenient)
 }

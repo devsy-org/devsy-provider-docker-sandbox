@@ -45,7 +45,7 @@ func TestCheckShellSetting(t *testing.T) {
 		{"trailing", measuredShellSetting + ` false`, testSchema},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			err := checkShellSetting([]byte(test.json))
+			err := checkShellSetting([]byte(test.json), false)
 			if test.code == "" {
 				if err != nil {
 					t.Fatal(err)
@@ -63,7 +63,7 @@ func TestCheckShellSetting(t *testing.T) {
 func TestShellSettingsReadOnly(t *testing.T) {
 	client := testClient(t)
 	profile := compat.Profile{ShellSettingSchema: compat.ShellSettingSchemaV0501}
-	if err := client.ShellSettings(context.Background(), profile); err != nil {
+	if err := client.ShellSettings(context.Background(), profile, false); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv(
@@ -75,6 +75,7 @@ func TestShellSettingsReadOnly(t *testing.T) {
 	if err := client.ShellSettings(
 		context.Background(),
 		profile,
+		false,
 	); !errors.As(err, &tagged) ||
 		tagged.Code != testShellOverride {
 		t.Fatalf("expected effective override rejection, got %v", err)
@@ -84,6 +85,7 @@ func TestShellSettingsReadOnly(t *testing.T) {
 	if err := client.ShellSettings(
 		context.Background(),
 		profile,
+		false,
 	); !errors.As(err, &tagged) ||
 		tagged.Code != "E_SBX_UNAVAILABLE" {
 		t.Fatalf("expected settings command failure, got %v", err)
@@ -92,7 +94,30 @@ func TestShellSettingsReadOnly(t *testing.T) {
 
 func TestShellSettingsRequiresProfileBeforeReading(t *testing.T) {
 	client := Client{Path: "missing-sbx"}
-	if err := client.ShellSettings(context.Background(), compat.Profile{}); err == nil {
+	if err := client.ShellSettings(context.Background(), compat.Profile{}, false); err == nil {
 		t.Fatal("unqualified settings unexpectedly accepted")
+	}
+}
+
+func TestCheckShellSettingLenient(t *testing.T) {
+	const extra = `{"default":"","key":"kit.shortcuts.shell","source":"default","type":"string","value":"","pending":true}`
+	if err := checkShellSetting([]byte(extra), true); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkShellSetting([]byte(extra), false); err == nil {
+		t.Fatal("strict decoding accepted an incomplete or extended setting")
+	}
+	for _, test := range []struct{ json, code string }{
+		{`{"default":"","key":"kit.shortcuts.shell","type":"string","value":""}`, testSchema},
+		{`{"default":"","key":"kit.shortcuts.shell","source":"default","type":"string","value":null}`, testSchema},
+		{`{"default":"","key":"kit.shortcuts.shell","source":"user","type":"string","value":"/bin/bash"}`, testShellOverride},
+		{`["default"]`, testSchema},
+		{`{"default":""`, testSchema},
+	} {
+		var tagged *compat.Error
+		if err := checkShellSetting([]byte(test.json), true); !errors.As(err, &tagged) ||
+			tagged.Code != test.code {
+			t.Fatalf("lenient decoding of %s: %v", test.json, err)
+		}
 	}
 }

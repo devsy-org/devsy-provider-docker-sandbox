@@ -10,15 +10,20 @@ import (
 	"github.com/devsy-org/devsy-provider-docker-sandbox/internal/state"
 )
 
-func (p Provider) Stop(ctx context.Context) (result error) {
+func (p Provider) Stop(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	if e := p.Profile.RequireOperationResultSchema(); e != nil {
 		return e
 	}
-	if e := p.live(ctx, false); e != nil {
+	bound, e := p.live(ctx, false)
+	if e != nil {
 		return e
 	}
+	return bound.stopAdmitted(ctx)
+}
+
+func (p Provider) stopAdmitted(ctx context.Context) (result error) {
 	mutation, e := p.mutations(ctx)
 	if e != nil {
 		return e
@@ -39,8 +44,16 @@ func (p Provider) Stop(ctx context.Context) (result error) {
 	return p.stopLocked(ctx, r)
 }
 
+func (p Provider) stopSettled(before, current string) bool {
+	kind, mapped := p.Profile.InventoryStates[current]
+	if mapped {
+		return kind == stateStopped
+	}
+	return current != before
+}
+
 func (p Provider) stopLocked(ctx context.Context, r state.Record) error {
-	item, e := p.ensureIdentity(ctx, r)
+	item, e := p.ensureIdentityWith(ctx, r, stopMode)
 	if e != nil {
 		return p.failWithStep(&r, e)
 	}
@@ -65,15 +78,16 @@ func (p Provider) stopLocked(ctx context.Context, r state.Record) error {
 			),
 		)
 	}
-	if e = sbx.CheckResult(out, r.SandboxName, stateStopped); e != nil {
+	if e = sbx.CheckResult(out, r.SandboxName, stateStopped, p.lenient); e != nil {
 		return p.MarkUncertain(&r, e)
 	}
+	before := item.State
 	e = waitState(ctx, 200*time.Millisecond, func() (bool, error) {
-		item, e := p.ensureIdentity(ctx, r)
+		item, e := p.ensureIdentityWith(ctx, r, stopMode)
 		if e != nil {
 			return false, e
 		}
-		return p.Profile.InventoryStates[item.State] == stateStopped, nil
+		return p.stopSettled(before, item.State), nil
 	})
 	if e != nil {
 		return p.MarkUncertain(&r, e)

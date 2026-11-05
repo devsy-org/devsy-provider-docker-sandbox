@@ -11,7 +11,7 @@ import (
 	"github.com/devsy-org/devsy-provider-docker-sandbox/internal/compat"
 )
 
-func stringFields(data []byte, names ...string) (map[string]string, error) {
+func stringFields(data []byte, lenient bool, names ...string) (map[string]string, error) {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	start, err := decoder.Token()
 	if err != nil || start != json.Delim('{') {
@@ -19,11 +19,13 @@ func stringFields(data []byte, names ...string) (map[string]string, error) {
 	}
 	fields := make(map[string]string, len(names))
 	for decoder.More() {
-		key, value, err := readStringField(decoder, names, fields)
+		key, value, err := readStringField(decoder, names, fields, lenient)
 		if err != nil {
 			return nil, err
 		}
-		fields[key] = value
+		if key != "" {
+			fields[key] = value
+		}
 	}
 	if err := finishStringFields(decoder, fields, names); err != nil {
 		return nil, err
@@ -31,7 +33,7 @@ func stringFields(data []byte, names ...string) (map[string]string, error) {
 	return fields, nil
 }
 
-func CheckResult(data []byte, name, action string) error {
+func CheckResult(data []byte, name, action string, lenient bool) error {
 	if name == "" || (action != "stopped" && action != "removed") {
 		return compat.Fail("E_SBX_SCHEMA", "invalid stop/remove result expectation")
 	}
@@ -39,17 +41,30 @@ func CheckResult(data []byte, name, action string) error {
 	if err := exact(data, &results); err != nil || len(results) != 1 {
 		return compat.Fail("E_SBX_SCHEMA", "expected one stop/remove result for %q", name)
 	}
-	fields, err := stringFields(results[0], "action", "resource", "name")
+	fields, err := stringFields(results[0], lenient, "action", "resource", "name")
 	if err != nil || !matchesResult(fields, name, action) {
 		return compat.Fail("E_SBX_SCHEMA", "unexpected stop/remove result for %q: %v", name, err)
 	}
 	return nil
 }
 
+func skipUnknownField(
+	decoder *json.Decoder,
+	key string,
+	lenient bool,
+) (keyResult string, valueResult string, resultErr error) {
+	if !lenient {
+		return "", "", fmt.Errorf("unexpected field %q", key)
+	}
+	var ignored json.RawMessage
+	return "", "", decoder.Decode(&ignored)
+}
+
 func readStringField(
 	decoder *json.Decoder,
 	names []string,
 	fields map[string]string,
+	lenient bool,
 ) (keyResult string, valueResult string, resultErr error) {
 	token, err := decoder.Token()
 	if err != nil {
@@ -59,9 +74,8 @@ func readStringField(
 	if !ok {
 		return "", "", errors.New("invalid JSON object key")
 	}
-	known := slices.Contains(names, key)
-	if !known {
-		return "", "", fmt.Errorf("unexpected field %q", key)
+	if !slices.Contains(names, key) {
+		return skipUnknownField(decoder, key, lenient)
 	}
 	if _, exists := fields[key]; exists {
 		return "", "", fmt.Errorf("duplicate field %q", key)

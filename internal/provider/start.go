@@ -12,7 +12,7 @@ import (
 func (p Provider) Start(ctx context.Context) (result error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	if e := p.live(ctx, true); e != nil {
+	if _, e := p.live(ctx, true); e != nil {
 		return e
 	}
 	if e := p.Profile.RequireDiskSizingQualification(); e != nil {

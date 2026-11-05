@@ -55,7 +55,7 @@ description = "Build dist/devsy-provider-docker-sandbox"
 run = "mkdir -p dist && go build -o dist/devsy-provider-docker-sandbox ./cmd/devsy-provider-docker-sandbox"
 
 [tasks.package]
-description = "Generate a checksum-pinned manifest from qualified native artifacts"
+description = "Generate a checksum-pinned manifest from native artifacts"
 run = 'go run ./cmd/package-provider "$RELEASE_TAG" dist internal/compat/profile.json'
 
 [tasks.pre-commit]

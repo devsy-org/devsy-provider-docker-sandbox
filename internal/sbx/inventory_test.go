@@ -92,6 +92,7 @@ func TestMeasuredInspectionRequiresMountlessExactIdentity(t *testing.T) {
 		readMeasuredFixture(t, "inspect-mountless.json"),
 		inventoryProfile(),
 		"devsy-qual-20261104",
+		false,
 	)
 	if err != nil || inspected.ID != "" || inspected.Name != "devsy-qual-20261104" ||
 		inspected.State != testRunning ||
@@ -106,11 +107,27 @@ func TestInspectionRejectsInvalidFields(t *testing.T) {
 	cases := inspectionInvalidCases()
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := decodeInspection([]byte(tc.data), inventoryProfile(), testOwned)
+			_, err := decodeInspection([]byte(tc.data), inventoryProfile(), testOwned, false)
 			if e, ok := err.(*compat.Error); !ok || e.Code != tc.code {
 				t.Fatalf("inspection error = %v, want %s", err, tc.code)
 			}
 		})
+	}
+}
+
+func TestInspectionToleratesUnrecognizedStateOnlyWhenAsked(t *testing.T) {
+	const data = `{"name":"owned","state":"paused","image_digest":"sha256:x","runtime_mounts":[]}`
+	_, err := decodeInspection([]byte(data), inventoryProfile(), testOwned, false)
+	if e, ok := err.(*compat.Error); !ok || e.Code != "E_SBX_STATE_UNKNOWN" {
+		t.Fatalf("strict inspection error = %v", err)
+	}
+	inspected, err := decodeInspection([]byte(data), inventoryProfile(), testOwned, true)
+	if err != nil || inspected.State != "paused" {
+		t.Fatalf("tolerant inspection = %+v, %v", inspected, err)
+	}
+	const noState = `{"name":"owned","image_digest":"sha256:x","runtime_mounts":[]}`
+	if _, err = decodeInspection([]byte(noState), inventoryProfile(), testOwned, true); err == nil {
+		t.Fatal("tolerant inspection accepted a missing state")
 	}
 }
 

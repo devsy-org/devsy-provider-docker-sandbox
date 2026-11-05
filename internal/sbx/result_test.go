@@ -19,6 +19,7 @@ func TestObservedOperationResults(t *testing.T) {
 				readMeasuredFixture(t, tc.file),
 				"devsy-qual-20261104",
 				tc.action,
+				false,
 			); err != nil {
 				t.Fatal(err)
 			}
@@ -68,7 +69,7 @@ func TestCheckResult(t *testing.T) {
 		{"empty target", stopped, "", testStopped, true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			err := CheckResult([]byte(test.json), test.target, test.action)
+			err := CheckResult([]byte(test.json), test.target, test.action, false)
 			if !test.wantError {
 				if err != nil {
 					t.Fatal(err)
@@ -80,5 +81,30 @@ func TestCheckResult(t *testing.T) {
 				t.Fatalf("expected schema rejection, got %v", err)
 			}
 		})
+	}
+}
+
+func TestCheckResultLenientIgnoresUnknownFields(t *testing.T) {
+	const extra = `[{"action":"stopped","resource":"sandbox","name":"owned","status":"done","id":{"a":[1]}}]`
+	if err := CheckResult([]byte(extra), testOwned, testStopped, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckResult([]byte(extra), testOwned, testStopped, false); err == nil {
+		t.Fatal("strict decoding accepted an unknown field")
+	}
+	for _, data := range []string{
+		`[{"action":"stopped","name":"owned","status":"done"}]`,
+		`[{"action":"stopped","resource":"sandbox","name":null,"status":"done"}]`,
+		`[{"action":"stopped","action":"stopped","resource":"sandbox","name":"owned"}]`,
+		`[{"action":"pending","resource":"sandbox","name":"owned","status":"done"}]`,
+		`[{"action":"stopped","resource":"sandbox","name":"owned"} true]`,
+		`[{"action":"stopped"`,
+		`{"action":"stopped","resource":"sandbox","name":"owned"}`,
+	} {
+		var tagged *compat.Error
+		err := CheckResult([]byte(data), testOwned, testStopped, true)
+		if !errors.As(err, &tagged) || tagged.Code != testSchema {
+			t.Fatalf("lenient decoding accepted %s: %v", data, err)
+		}
 	}
 }

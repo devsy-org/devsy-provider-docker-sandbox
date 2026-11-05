@@ -14,7 +14,7 @@ func (p Provider) Status(ctx context.Context) (string, error) {
 	if e != nil {
 		return statusLoadError(e)
 	}
-	if e = p.live(ctx, false); e != nil {
+	if _, e = p.live(ctx, false); e != nil {
 		return "", e
 	}
 	if status, done, e := p.statusMutationLock(); done {

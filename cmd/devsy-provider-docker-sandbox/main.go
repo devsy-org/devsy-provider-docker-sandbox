@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"syscall"
@@ -18,7 +19,10 @@ import (
 
 var version = "development"
 
-const recoverVerb = "recover"
+const (
+	recoverVerb = "recover"
+	initVerb    = "init"
+)
 
 func usage() {
 	fmt.Fprintln(
@@ -43,7 +47,7 @@ type invocation struct {
 type handler func(invocation) error
 
 var handlers = map[string]handler{
-	"init": runInit, "doctor": runDoctor, recoverVerb: runRecover,
+	initVerb: runInit, "doctor": runDoctor, recoverVerb: runRecover,
 	"create": func(i invocation) error { return i.p.Create(i.ctx) },
 	"start":  func(i invocation) error { return i.p.Start(i.ctx) },
 	"stop":   func(i invocation) error { return i.p.Stop(i.ctx) },
@@ -123,11 +127,12 @@ func dispatch(i invocation, verb string, h handler) error {
 	if bypassConfig(verb, o) {
 		return h(i)
 	}
+	warnUnqualifiedHost(os.Stderr, i.profile, verb)
 	cfg, err := loadConfig(verb, o.key)
 	if err != nil {
 		return err
 	}
-	if verb == "init" {
+	if verb == initVerb {
 		return provider.Init(i.ctx, cfg, i.profile)
 	}
 	if o.key != "" {
@@ -139,6 +144,15 @@ func dispatch(i invocation, verb string, h handler) error {
 		return err
 	}
 	return h(i)
+}
+
+func warnUnqualifiedHost(w io.Writer, profile compat.Profile, verb string) {
+	if verb != initVerb && verb != "create" && verb != "start" {
+		return
+	}
+	if warning := profile.HostWarning(); warning != "" {
+		_, _ = fmt.Fprintln(w, "warning: "+warning)
+	}
 }
 
 func loadConfig(verb, key string) (config.Config, error) {

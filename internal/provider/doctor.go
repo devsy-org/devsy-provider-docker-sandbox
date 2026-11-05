@@ -11,18 +11,65 @@ import (
 	"github.com/devsy-org/devsy-provider-docker-sandbox/internal/state"
 )
 
+const (
+	compatibilityQualified = "qualified"
+	compatibilityWarning   = "warning"
+)
+
 type Diagnosis struct {
-	SchemaVersion int             `json:"schema_version"`
-	MachineKey    string          `json:"machine_key"`
-	Compatibility compat.Profile  `json:"compatibility"`
-	Record        *state.Record   `json:"record,omitempty"`
-	Attempts      []state.Attempt `json:"attempts,omitempty"`
-	Backend       *sbx.Sandbox    `json:"backend,omitempty"`
-	BackendError  string          `json:"backend_error,omitempty"`
+	SchemaVersion      int             `json:"schema_version"`
+	MachineKey         string          `json:"machine_key"`
+	Compatibility      compat.Profile  `json:"compatibility"`
+	Record             *state.Record   `json:"record,omitempty"`
+	Attempts           []state.Attempt `json:"attempts,omitempty"`
+	Backend            *sbx.Sandbox    `json:"backend,omitempty"`
+	BackendError       string          `json:"backend_error,omitempty"`
+	Warnings           []string        `json:"warnings,omitempty"`
+	SBX                *compat.Tuple   `json:"sbx,omitempty"`
+	CompatibilityState string          `json:"compatibility_state,omitempty"`
+}
+
+func hostWarnings(profile compat.Profile) []string {
+	if warning := profile.HostWarning(); warning != "" {
+		return []string{warning}
+	}
+	return nil
+}
+
+func joinBackendErrors(first, second string) string {
+	if first == "" {
+		return second
+	}
+	return first + "; " + second
+}
+
+func (p Provider) doctorVersion(ctx context.Context, out *Diagnosis) {
+	v, e := p.Backend.Version(ctx)
+	if e != nil {
+		out.BackendError = e.Error()
+		return
+	}
+	daemon, e := sbx.DaemonVersion(v, p.Profile)
+	if e != nil {
+		out.BackendError = e.Error()
+		return
+	}
+	tuple := compat.Tuple{Client: v.Client.Version, Revision: v.Client.Revision, Daemon: daemon}
+	out.SBX = &tuple
+	out.CompatibilityState = compatibilityQualified
+	if warning := p.Profile.TupleWarning(tuple); warning != "" {
+		out.CompatibilityState = compatibilityWarning
+		out.Warnings = append(out.Warnings, warning)
+	}
 }
 
 func (p Provider) Doctor(ctx context.Context) ([]byte, error) {
-	out := Diagnosis{SchemaVersion: 1, MachineKey: p.Store.Key, Compatibility: p.Profile}
+	out := Diagnosis{
+		SchemaVersion: 1,
+		MachineKey:    p.Store.Key,
+		Compatibility: p.Profile,
+		Warnings:      hostWarnings(p.Profile),
+	}
 	r, e := p.doctorRecord(&out)
 	if e != nil {
 		return nil, e
@@ -32,14 +79,24 @@ func (p Provider) Doctor(ctx context.Context) ([]byte, error) {
 		return nil, e
 	}
 	out.Attempts = a
-	if out.Record != nil && p.Backend != nil && p.Config.SBXPath != "" {
-		if item, found, e := p.observeAllowingAttached(ctx, r); e != nil {
-			out.BackendError = e.Error()
-		} else if found {
-			out.Backend = &item
-		}
-	}
+	p.doctorBackend(ctx, &out, r)
 	return json.MarshalIndent(out, "", "  ")
+}
+
+func (p Provider) doctorBackend(ctx context.Context, out *Diagnosis, r state.Record) {
+	if p.Backend == nil || p.Config.SBXPath == "" {
+		return
+	}
+	p.doctorVersion(ctx, out)
+	if out.Record == nil {
+		return
+	}
+	item, found, e := p.observeAllowingAttached(ctx, r)
+	if e != nil {
+		out.BackendError = joinBackendErrors(out.BackendError, e.Error())
+	} else if found {
+		out.Backend = &item
+	}
 }
 
 func (p Provider) doctorRecord(out *Diagnosis) (state.Record, error) {
@@ -82,5 +139,6 @@ func List(_ context.Context, p compat.Profile) ([]byte, error) {
 		SchemaVersion int            `json:"schema_version"`
 		Compatibility compat.Profile `json:"compatibility"`
 		Records       []state.Record `json:"records"`
-	}{1, p, records}, "", "  ")
+		Warnings      []string       `json:"warnings,omitempty"`
+	}{1, p, records, hostWarnings(p)}, "", "  ")
 }

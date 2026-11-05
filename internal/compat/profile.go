@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -16,6 +17,8 @@ import (
 
 //go:embed profile.json
 var profileFS embed.FS
+
+const IssuesURL = "https://github.com/devsy-org/devsy-provider-docker-sandbox/issues"
 
 const (
 	ShellSettingSchemaV0501          = "v0.50.1/effective-shell-setting"
@@ -72,32 +75,80 @@ func Load() (Profile, error) {
 	return p, nil
 }
 
+func currentHost() string { return runtime.GOOS + "/" + runtime.GOARCH }
+
+func (p Profile) HostQualified() bool {
+	return slices.Contains(p.QualifiedHosts, currentHost())
+}
+
 func (p Profile) Host() error {
-	tuple := runtime.GOOS + "/" + runtime.GOARCH
-	ok := false
-	for _, v := range p.QualifiedHosts {
-		if v == tuple {
-			ok = true
-		}
-	}
-	if !ok {
-		return Fail(
-			"E_HOST_UNSUPPORTED",
-			"%s has no native-qualified profile; qualified hosts: %v",
-			tuple,
-			p.QualifiedHosts,
-		)
+	if !p.HostQualified() {
+		return nil
 	}
 	return hostVersion()
 }
 
-func (p Profile) SBX(version, revision string) error {
-	for _, v := range p.QualifiedSBXVersions {
-		if version == v && revision != "" && p.QualifiedSBXRevisions[version] == revision {
-			return nil
-		}
+func (p Profile) HostWarning() string {
+	if p.HostQualified() {
+		return ""
 	}
-	return Fail("E_SBX_VERSION", "sbx %q revision %q has no qualified profile", version, revision)
+	qualified := "none"
+	if len(p.QualifiedHosts) != 0 {
+		qualified = strings.Join(p.QualifiedHosts, ", ")
+	}
+	return fmt.Sprintf(
+		"host %s is built and unit-tested only and has no native qualification evidence; "+
+			"natively qualified hosts: %s",
+		currentHost(),
+		qualified,
+	)
+}
+
+type Tuple struct {
+	Client   string `json:"client"`
+	Revision string `json:"revision"`
+	Daemon   string `json:"daemon"`
+}
+
+func (p Profile) TupleQualified(t Tuple) bool {
+	return t.Revision != "" && t.Daemon != "" &&
+		slices.Contains(p.QualifiedSBXVersions, t.Client) &&
+		p.QualifiedSBXRevisions[t.Client] == t.Revision &&
+		slices.Contains(p.QualifiedDaemonVersions[t.Client], t.Daemon)
+}
+
+func (p Profile) TupleWarning(t Tuple) string {
+	if p.TupleQualified(t) {
+		return ""
+	}
+	qualified := make([]string, 0, len(p.QualifiedSBXVersions))
+	for _, version := range p.QualifiedSBXVersions {
+		qualified = append(qualified, fmt.Sprintf(
+			"sbx %s revision %s daemon %s",
+			version,
+			orUnknown(p.QualifiedSBXRevisions[version]),
+			orUnknown(strings.Join(p.QualifiedDaemonVersions[version], ", ")),
+		))
+	}
+	if len(qualified) == 0 {
+		qualified = append(qualified, "none")
+	}
+	return fmt.Sprintf(
+		"sbx %s revision %s daemon %s is not a qualified version, so the provider runs best effort; "+
+			"qualified: %s; please file an issue at %s so this version can be qualified",
+		orUnknown(t.Client),
+		orUnknown(t.Revision),
+		orUnknown(t.Daemon),
+		strings.Join(qualified, "; "),
+		IssuesURL,
+	)
+}
+
+func orUnknown(s string) string {
+	if s == "" {
+		return "unknown"
+	}
+	return s
 }
 
 type semver struct {
@@ -332,7 +383,10 @@ func MeasuredDiskSizingSchema(host, version, revision string) string {
 }
 
 func (p Profile) RequireDiskSizingQualification() error {
-	host := runtime.GOOS + "/" + runtime.GOARCH
+	if !p.HostQualified() {
+		return nil
+	}
+	host := currentHost()
 	if len(p.QualifiedSBXVersions) != 1 {
 		return Fail(
 			"E_GUEST_CAPABILITY",

@@ -32,4 +32,12 @@ const (
 	testUnitRunning        = "unit-running"
 	kindCommand            = "command"
 	codeOperationUncertain = "E_OPERATION_UNCERTAIN"
+	unqualifiedHost        = "plan9/mips"
+	testUnitRevision       = "unit-revision"
+	testUnitImage          = "sha256:unit-image"
+	testUnitID             = "unit-id"
+	testStatusRunning      = "Running"
+	codeSBXVersion         = "E_SBX_VERSION"
+	codeSBXStateUnknown    = "E_SBX_STATE_UNKNOWN"
+	testWindows            = "windows"
 )

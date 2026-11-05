@@ -11,29 +11,17 @@ on:
 permissions:
   contents: read
 jobs:
-  plan:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      matrix: ${{ steps.hosts.outputs.matrix }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          persist-credentials: false
-      - id: hosts
-        shell: bash
-        run: |
-          jq -e '.qualified_hosts | length > 0' internal/compat/profile.json
-          matrix="$(jq -ce '[.qualified_hosts[] | split("/") as $p | {os:$p[0],arch:$p[1],runner:(if $p[0] == "darwin" then "macos-latest" elif $p[0] == "windows" then "windows-latest" elif $p[1] == "arm64" then "ubuntu-24.04-arm" else "ubuntu-latest" end),suffix:(if $p[0] == "windows" then ".exe" else "" end)}] | if length == (unique_by(.os,.arch) | length) then . else error("duplicate native host") end' internal/compat/profile.json)"
-          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
   build:
-    needs: plan
     runs-on: ${{ matrix.host.runner }}
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        host: ${{ fromJSON(needs.plan.outputs.matrix) }}
+        host:
+          - {os: linux, arch: amd64, runner: ubuntu-latest, suffix: ''}
+          - {os: linux, arch: arm64, runner: ubuntu-24.04-arm, suffix: ''}
+          - {os: darwin, arch: arm64, runner: macos-latest, suffix: ''}
+          - {os: windows, arch: amd64, runner: windows-latest, suffix: '.exe'}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -41,7 +29,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
         with:
           go-version-file: go.mod
-      - name: Compile and execute on target platform
+      - name: Test, compile and execute on target platform
         shell: bash
         env:
           VERSION: ${{ inputs.version }}
@@ -51,6 +39,7 @@ jobs:
         run: |
           test "$(go env GOOS)" = "$TARGET_OS"
           test "$(go env GOARCH)" = "$TARGET_ARCH"
+          go test ./...
           mkdir -p dist
           name="devsy-provider-docker-sandbox-$TARGET_OS-$TARGET_ARCH$SUFFIX"
           go build -trimpath -ldflags "-X main.version=$VERSION" -o "dist/$name" ./cmd/devsy-provider-docker-sandbox
@@ -61,7 +50,7 @@ jobs:
           path: dist/*
           if-no-files-found: error
   manifest:
-    needs: [plan, build]
+    needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -91,13 +80,17 @@ jobs:
           path: dist/*
           if-no-files-found: error
   install:
-    needs: [plan, manifest]
+    needs: manifest
     runs-on: ${{ matrix.host.runner }}
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        host: ${{ fromJSON(needs.plan.outputs.matrix) }}
+        host:
+          - {os: linux, arch: amd64, runner: ubuntu-latest, suffix: ''}
+          - {os: linux, arch: arm64, runner: ubuntu-24.04-arm, suffix: ''}
+          - {os: darwin, arch: arm64, runner: macos-latest, suffix: ''}
+          - {os: windows, arch: amd64, runner: windows-latest, suffix: '.exe'}
     steps:
       - name: Require pinned compatible Devsy core commit
         shell: bash

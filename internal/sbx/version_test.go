@@ -27,7 +27,7 @@ func TestObservedUnavailableDaemonIsNotHealthy(t *testing.T) {
 		DaemonSchema:            "test-observed-unavailable",
 		QualifiedDaemonVersions: map[string][]string{testVersion: {testVersion}},
 	}
-	if _, e = ServerVersion(v, p); e == nil {
+	if _, e = DaemonVersion(v, p); e == nil {
 		t.Fatal("unavailable daemon accepted as healthy")
 	}
 }
@@ -45,7 +45,7 @@ func TestObservedRunningDaemonVersion(t *testing.T) {
 		DaemonSchema:            "v0.50.1/server-running",
 		QualifiedDaemonVersions: map[string][]string{testVersion: {testVersion}},
 	}
-	if version, err := ServerVersion(observed, profile); err != nil || version != testVersion {
+	if version, err := DaemonVersion(observed, profile); err != nil || version != testVersion {
 		t.Fatalf("measured daemon version = %q, %v", version, err)
 	}
 }

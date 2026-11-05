@@ -10,15 +10,20 @@ import (
 	"github.com/devsy-org/devsy-provider-docker-sandbox/internal/state"
 )
 
-func (p Provider) Delete(ctx context.Context) (result error) {
+func (p Provider) Delete(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
 	if e := p.Profile.RequireOperationResultSchema(); e != nil {
 		return e
 	}
-	if e := p.live(ctx, false); e != nil {
+	bound, e := p.live(ctx, false)
+	if e != nil {
 		return e
 	}
+	return bound.deleteAdmitted(ctx)
+}
+
+func (p Provider) deleteAdmitted(ctx context.Context) (result error) {
 	mutation, e := p.mutations(ctx)
 	if e != nil {
 		return e
@@ -40,7 +45,7 @@ func (p Provider) Delete(ctx context.Context) (result error) {
 }
 
 func (p Provider) deleteLocked(ctx context.Context, r state.Record) error {
-	_, found, e := p.observeAllowingAttached(ctx, r)
+	_, found, e := p.observeWith(ctx, r, teardownMode)
 	if e != nil {
 		return p.failWithStep(&r, e)
 	}
@@ -74,13 +79,13 @@ func (p Provider) deleteLocked(ctx context.Context, r state.Record) error {
 			),
 		)
 	}
-	if e = sbx.CheckResult(out, r.SandboxName, "removed"); e != nil {
+	if e = sbx.CheckResult(out, r.SandboxName, "removed", p.lenient); e != nil {
 		return p.MarkUncertain(&r, e)
 	}
 	e = waitState(
 		ctx,
 		200*time.Millisecond,
-		func() (bool, error) { _, found, e := p.observeAllowingAttached(ctx, r); return !found, e },
+		func() (bool, error) { _, found, e := p.observeWith(ctx, r, teardownMode); return !found, e },
 	)
 	if e != nil {
 		return p.MarkUncertain(&r, e)

@@ -121,7 +121,7 @@ func matchesCreateTiming(attempt state.Attempt) bool {
 }
 
 func (p Provider) RecoverOperation(ctx context.Context, id string) (result error) {
-	if e := p.live(ctx, false); e != nil {
+	if _, e := p.live(ctx, false); e != nil {
 		return e
 	}
 	mutation, e := p.mutations(ctx)
@@ -160,7 +160,7 @@ func (p Provider) recoverOperationLocked(ctx context.Context, id string) error {
 			"reconcile child attempts before backend acknowledgement",
 		)
 	}
-	item, found, e := p.observeAllowingAttached(ctx, r)
+	item, found, e := p.observeWith(ctx, r, teardownMode)
 	if e != nil {
 		return e
 	}

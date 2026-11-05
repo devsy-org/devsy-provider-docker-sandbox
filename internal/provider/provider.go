@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"time"
 
@@ -15,8 +16,8 @@ import (
 type Backend interface {
 	Version(context.Context) (sbx.Version, error)
 	Inventory(context.Context, compat.Profile) (sbx.Inventory, error)
-	Inspect(context.Context, compat.Profile, string) (sbx.Inspection, error)
-	ShellSettings(context.Context, compat.Profile) error
+	Inspect(context.Context, compat.Profile, string, bool) (sbx.Inspection, error)
+	ShellSettings(context.Context, compat.Profile, bool) error
 	Start(context.Context, sbx.StartRequest) (*sbx.Process, error)
 }
 type Provider struct {
@@ -25,6 +26,8 @@ type Provider struct {
 	Backend  Backend
 	Store    state.Store
 	Identity config.MachineIdentity
+	Warner   *compat.Warner
+	lenient  bool
 }
 
 func New(c config.Config, p compat.Profile) (Provider, error) {
@@ -42,6 +45,7 @@ func New(c config.Config, p compat.Profile) (Provider, error) {
 		Backend:  sbx.Client{Path: c.SBXPath, Store: store},
 		Store:    store,
 		Identity: identity,
+		Warner:   compat.Stderr,
 	}, nil
 }
 
@@ -55,38 +59,37 @@ func FromKey(c config.Config, p compat.Profile, key string) (Provider, error) {
 		Profile: p,
 		Backend: sbx.Client{Path: c.SBXPath, Store: s},
 		Store:   s,
+		Warner:  compat.Stderr,
 	}, nil
 }
 
-func (p Provider) compat(ctx context.Context, needsDevsy bool) error {
+func (p Provider) compat(ctx context.Context, needsDevsy bool) (bool, error) {
 	if needsDevsy {
 		if e := p.Profile.Devsy(ctx, p.Config.Devsy); e != nil {
-			return e
+			return false, e
 		}
 	}
 	if e := p.Profile.Host(); e != nil {
-		return e
+		return false, e
 	}
-	if _, e := p.compatBackendVersion(ctx); e != nil {
-		return e
+	if _, e := p.Backend.Version(ctx); e != nil {
+		return false, e
 	}
 	if _, e := p.Backend.Inventory(ctx, p.Profile); e != nil {
-		return e
+		return false, e
 	}
-	v, e := p.compatBackendVersion(ctx)
-	if e != nil {
-		return e
-	}
-	_, e = sbx.ServerVersion(v, p.Profile)
-	return e
-}
-
-func (p Provider) compatBackendVersion(ctx context.Context) (sbx.Version, error) {
 	v, e := p.Backend.Version(ctx)
 	if e != nil {
-		return v, e
+		return false, e
 	}
-	return v, p.Profile.SBX(v.Client.Version, v.Client.Revision)
+	daemon, e := sbx.DaemonVersion(v, p.Profile)
+	if e != nil {
+		return false, e
+	}
+	tuple := compat.Tuple{Client: v.Client.Version, Revision: v.Client.Revision, Daemon: daemon}
+	warning := p.Profile.TupleWarning(tuple)
+	p.Warner.Warn(warning)
+	return warning != "", nil
 }
 
 func (p Provider) load() (state.Record, error) {
@@ -111,23 +114,33 @@ func (p Provider) load() (state.Record, error) {
 	return r, nil
 }
 
+type observeMode struct {
+	allowAttached bool
+	tolerateState bool
+}
+
+var (
+	stopMode     = observeMode{tolerateState: true}
+	teardownMode = observeMode{allowAttached: true, tolerateState: true}
+)
+
 func (p Provider) observe(ctx context.Context, r state.Record) (sbx.Sandbox, bool, error) {
-	return p.observeWithRetry(ctx, r, false)
+	return p.observeWith(ctx, r, observeMode{})
 }
 
 func (p Provider) observeAllowingAttached(
 	ctx context.Context,
 	r state.Record,
 ) (sbx.Sandbox, bool, error) {
-	return p.observeWithRetry(ctx, r, true)
+	return p.observeWith(ctx, r, observeMode{allowAttached: true})
 }
 
-func (p Provider) observeWithRetry(
+func (p Provider) observeWith(
 	ctx context.Context,
 	r state.Record,
-	allowAttached bool,
+	mode observeMode,
 ) (sbx.Sandbox, bool, error) {
-	item, found, err := p.observeSnapshot(ctx, r, allowAttached)
+	item, found, err := p.observeSnapshot(ctx, r, mode)
 	if err == nil || ctx.Err() != nil {
 		return item, found, err
 	}
@@ -136,13 +149,13 @@ func (p Provider) observeWithRetry(
 		(qualified.Code != "E_SBX_STATE_UNKNOWN" && qualified.Code != "E_SBX_UNAVAILABLE") {
 		return item, found, err
 	}
-	return p.observeSnapshot(ctx, r, allowAttached)
+	return p.observeSnapshot(ctx, r, mode)
 }
 
 func (p Provider) observeSnapshot(
 	ctx context.Context,
 	r state.Record,
-	allowAttached bool,
+	mode observeMode,
 ) (sbx.Sandbox, bool, error) {
 	items, e := p.Backend.Inventory(ctx, p.Profile)
 	if e != nil {
@@ -152,10 +165,10 @@ func (p Provider) observeSnapshot(
 	if !found {
 		return sbx.Sandbox{}, false, nil
 	}
-	if e = p.checkInventory(item, r, allowAttached); e != nil {
+	if e = p.checkInventory(item, r, mode); e != nil {
 		return sbx.Sandbox{}, false, e
 	}
-	inspected, e := p.Backend.Inspect(ctx, p.Profile, item.Name)
+	inspected, e := p.Backend.Inspect(ctx, p.Profile, item.Name, mode.tolerateState)
 	if e != nil {
 		return sbx.Sandbox{}, false, e
 	}
@@ -166,12 +179,12 @@ func (p Provider) observeSnapshot(
 	return item, true, nil
 }
 
-func (p Provider) checkInventory(item sbx.Sandbox, r state.Record, allowAttached bool) error {
-	kind, e := p.inventoryKind(item.State)
+func (p Provider) checkInventory(item sbx.Sandbox, r state.Record, mode observeMode) error {
+	kind, e := p.inventoryKind(item.State, mode.tolerateState)
 	if e != nil {
 		return e
 	}
-	if kind == stateRunning && !item.Detached && !allowAttached {
+	if kind == stateRunning && !item.Detached && !mode.allowAttached {
 		return compat.Fail(codeSBXSchema, "owned running sandbox is not detached")
 	}
 	if r.SandboxID != "" && item.ID != r.SandboxID {
@@ -186,16 +199,29 @@ func (p Provider) checkInventory(item sbx.Sandbox, r state.Record, allowAttached
 	return nil
 }
 
-func (p Provider) inventoryKind(backendState string) (string, error) {
+func (p Provider) inventoryKind(backendState string, tolerate bool) (string, error) {
 	kind, qualified := p.Profile.InventoryStates[backendState]
-	if !qualified || !qualifiedInventoryKind(kind) {
-		return "", compat.Fail(
-			"E_SBX_STATE_UNKNOWN",
-			"unqualified owned sandbox state %q",
-			backendState,
-		)
+	if qualified && qualifiedInventoryKind(kind) {
+		return kind, nil
 	}
-	return kind, nil
+	if tolerate {
+		p.Warner.Warn(unrecognizedStateWarning(backendState))
+		return "", nil
+	}
+	return "", compat.Fail(
+		"E_SBX_STATE_UNKNOWN",
+		"unqualified owned sandbox state %q",
+		backendState,
+	)
+}
+
+func unrecognizedStateWarning(backendState string) string {
+	return fmt.Sprintf(
+		"sandbox state %q is not recognized by this provider, so it proceeds best effort without "+
+			"being able to classify that state; please file an issue at %s",
+		backendState,
+		compat.IssuesURL,
+	)
 }
 
 func checkInspection(item sbx.Sandbox, inspected sbx.Inspection, r state.Record) error {
@@ -355,8 +381,11 @@ func (p Provider) drainSessions(ctx context.Context, admission *state.Lock) (*st
 func (p Provider) live(
 	ctx context.Context,
 	needsDevsy bool,
-) error {
-	return p.compat(ctx, needsDevsy)
+) (Provider, error) {
+	lenient, e := p.compat(ctx, needsDevsy)
+	bound := p
+	bound.lenient = lenient
+	return bound, e
 }
 
 func (p Provider) guardPrior(r state.Record) (result error) {
@@ -433,7 +462,15 @@ func (p Provider) successful(r *state.Record, phase, desired string) error {
 }
 
 func (p Provider) ensureIdentity(ctx context.Context, r state.Record) (sbx.Sandbox, error) {
-	s, found, e := p.observe(ctx, r)
+	return p.ensureIdentityWith(ctx, r, observeMode{})
+}
+
+func (p Provider) ensureIdentityWith(
+	ctx context.Context,
+	r state.Record,
+	mode observeMode,
+) (sbx.Sandbox, error) {
+	s, found, e := p.observeWith(ctx, r, mode)
 	if e != nil {
 		return s, e
 	}

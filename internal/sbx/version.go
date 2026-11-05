@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"slices"
 	"time"
 
 	"github.com/devsy-org/devsy-provider-docker-sandbox/internal/compat"
@@ -46,7 +45,7 @@ func (c Client) Version(ctx context.Context) (Version, error) {
 	return v, nil
 }
 
-func ServerVersion(v Version, p compat.Profile) (string, error) {
+func DaemonVersion(v Version, p compat.Profile) (string, error) {
 	if e := p.RequireDaemonSchema(); e != nil {
 		return "", e
 	}
@@ -61,16 +60,8 @@ func ServerVersion(v Version, p compat.Profile) (string, error) {
 		server.State != "running" {
 		return "", compat.Fail(
 			"E_SBX_VERSION",
-			"qualified successful-server daemon version unavailable",
+			"successful-server daemon version unavailable",
 		)
 	}
-	if slices.Contains(p.QualifiedDaemonVersions[v.Client.Version], server.Version) {
-		return server.Version, nil
-	}
-	return "", compat.Fail(
-		"E_SBX_VERSION",
-		"sbx client %s and daemon %s are not a qualified pair",
-		v.Client.Version,
-		server.Version,
-	)
+	return server.Version, nil
 }

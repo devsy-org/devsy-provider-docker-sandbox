@@ -106,9 +106,11 @@ jobs:
           {
             printf 'Docker Sandboxes provider %s\n\n' "$VERSION"
             printf 'Required Devsy core release: %s (%s)\n\n' "$CORE_TAG" "$CORE_REF"
-            printf 'Native VM qualification for this candidate:\n'
+            printf 'Natively qualified hosts, with native VM evidence for this candidate:\n'
             jq -r '.hosts[] | "- \(.host): sbx client \(.client_version), daemon \(.daemon_version), evidence \(.ci_run_url)"' "$EVIDENCE_FILE"
-            printf '\nThe manifest includes only these qualified hosts. Install sbx and sign in separately. Deleting a default workspace machine removes all guest data, including named volumes.\n'
+            printf '\nBuilt and unit-tested only, with no native qualification evidence. These hosts run with a warning:\n'
+            jq -r '["linux/amd64", "linux/arm64", "darwin/arm64", "windows/amd64"] - .qualified_hosts | .[] | "- " + .' internal/compat/profile.json
+            printf '\nThe manifest includes all four hosts. Install sbx and sign in separately. Deleting a default workspace machine removes all guest data, including named volumes.\n'
           } > dist/RELEASE_NOTES.txt
       - name: Publish complete release assets
         shell: bash

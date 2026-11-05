@@ -16,7 +16,12 @@ type Inspection struct {
 	RuntimeMounts []json.RawMessage `json:"runtime_mounts"`
 }
 
-func (c Client) Inspect(ctx context.Context, p compat.Profile, name string) (Inspection, error) {
+func (c Client) Inspect(
+	ctx context.Context,
+	p compat.Profile,
+	name string,
+	tolerateState bool,
+) (Inspection, error) {
 	if e := p.RequireInventorySchema(); e != nil {
 		return Inspection{}, e
 	}
@@ -24,10 +29,15 @@ func (c Client) Inspect(ctx context.Context, p compat.Profile, name string) (Ins
 	if e != nil {
 		return Inspection{}, compat.Wrap("E_SBX_UNAVAILABLE", e)
 	}
-	return decodeInspection(data, p, name)
+	return decodeInspection(data, p, name, tolerateState)
 }
 
-func decodeInspection(data []byte, p compat.Profile, name string) (Inspection, error) {
+func decodeInspection(
+	data []byte,
+	p compat.Profile,
+	name string,
+	tolerateState bool,
+) (Inspection, error) {
 	var raw json.RawMessage
 	if e := exact(data, &raw); e != nil {
 		return Inspection{}, compat.Fail("E_SBX_SCHEMA", "invalid sbx inspect JSON")
@@ -46,7 +56,7 @@ func decodeInspection(data []byte, p compat.Profile, name string) (Inspection, e
 			"sbx inspect returned a different sandbox name",
 		)
 	}
-	if !qualifiedState(p, inspected.State) {
+	if !tolerateState && !qualifiedState(p, inspected.State) {
 		return Inspection{}, compat.Fail(
 			"E_SBX_STATE_UNKNOWN",
 			"unqualified sbx inspect state %q",
