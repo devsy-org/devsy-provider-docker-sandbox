@@ -2,3 +2,5 @@
 *.test
 *.prof
 .DS_Store
+
+coverage.out

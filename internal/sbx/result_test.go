@@ -11,11 +11,15 @@ func TestObservedOperationResults(t *testing.T) {
 	for _, tc := range []struct {
 		file, action string
 	}{
-		{"stop-result.json", "stopped"},
+		{"stop-result.json", testStopped},
 		{"rm-result.json", "removed"},
 	} {
 		t.Run(tc.action, func(t *testing.T) {
-			if err := CheckResult(readMeasuredFixture(t, tc.file), "devsy-qual-20261104", tc.action); err != nil {
+			if err := CheckResult(
+				readMeasuredFixture(t, tc.file),
+				"devsy-qual-20261104",
+				tc.action,
+			); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -28,23 +32,40 @@ func TestCheckResult(t *testing.T) {
 		name, json, target, action string
 		wantError                  bool
 	}{
-		{"wrong name", stopped, "other", "stopped", true},
-		{"wrong action", stopped, "owned", "removed", true},
-		{"wrong resource", `[{"action":"stopped","resource":"workspace","name":"owned"}]`, "owned", "stopped", true},
-		{"extra target", `[{"action":"stopped","resource":"sandbox","name":"owned"},{"action":"stopped","resource":"sandbox","name":"other"}]`, "owned", "stopped", true},
-		{"duplicate target", `[` + stopped[1:len(stopped)-1] + `,` + stopped[1:len(stopped)-1] + `]`, "owned", "stopped", true},
-		{"pending", `[{"action":"pending","resource":"sandbox","name":"owned"}]`, "owned", "stopped", true},
-		{"error", `[{"action":"stopped","resource":"sandbox","name":"owned","error":"failed"}]`, "owned", "stopped", true},
-		{"extra property", `[{"action":"stopped","resource":"sandbox","name":"owned","status":"done"}]`, "owned", "stopped", true},
-		{"missing property", `[{"action":"stopped","name":"owned"}]`, "owned", "stopped", true},
-		{"duplicate property", `[{"action":"stopped","action":"stopped","resource":"sandbox","name":"owned"}]`, "owned", "stopped", true},
-		{"null property", `[{"action":"stopped","resource":"sandbox","name":null}]`, "owned", "stopped", true},
-		{"empty", `[]`, "owned", "stopped", true},
-		{"null", `null`, "owned", "stopped", true},
-		{"malformed", `[{"action":"stopped"`, "owned", "stopped", true},
-		{"trailing", stopped + ` true`, "owned", "stopped", true},
-		{"bad expectation", stopped, "owned", "pending", true},
-		{"empty target", stopped, "", "stopped", true},
+		{"wrong name", stopped, "other", testStopped, true},
+		{"wrong action", stopped, testOwned, "removed", true},
+		{"wrong resource", `[{"action":"stopped","resource":"workspace","name":"owned"}]`, testOwned, testStopped, true},
+		{"extra target", `[{"action":"stopped","resource":"sandbox","name":"owned"},{"actio` +
+			`n":"stopped","resource":"sandbox","name":"other"}]`, testOwned, testStopped, true},
+		{
+			"duplicate target", `[` + stopped[1:len(stopped)-1] + `,` + stopped[1:len(stopped)-1] + `]`,
+			testOwned,
+			testStopped, true,
+		},
+		{"pending", `[{"action":"pending","resource":"sandbox","name":"owned"}]`, testOwned, testStopped, true},
+		{
+			"error", `[{"action":"stopped","resource":"sandbox","name":"owned","error":"failed"}]`,
+			testOwned,
+			testStopped, true,
+		},
+		{
+			"extra property", `[{"action":"stopped","resource":"sandbox","name":"owned","status":"done"}]`,
+			testOwned,
+			testStopped, true,
+		},
+		{"missing property", `[{"action":"stopped","name":"owned"}]`, testOwned, testStopped, true},
+		{
+			"duplicate property", `[{"action":"stopped","action":"stopped","resource":"sandbox","name":"owned"}]`,
+			testOwned,
+			testStopped, true,
+		},
+		{"null property", `[{"action":"stopped","resource":"sandbox","name":null}]`, testOwned, testStopped, true},
+		{"empty", `[]`, testOwned, testStopped, true},
+		{"null", testNull, testOwned, testStopped, true},
+		{"malformed", `[{"action":"stopped"`, testOwned, testStopped, true},
+		{"trailing", stopped + ` true`, testOwned, testStopped, true},
+		{"bad expectation", stopped, testOwned, "pending", true},
+		{"empty target", stopped, "", testStopped, true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			err := CheckResult([]byte(test.json), test.target, test.action)
@@ -55,7 +76,7 @@ func TestCheckResult(t *testing.T) {
 				return
 			}
 			var tagged *compat.Error
-			if !errors.As(err, &tagged) || tagged.Code != "E_SBX_SCHEMA" {
+			if !errors.As(err, &tagged) || tagged.Code != testSchema {
 				t.Fatalf("expected schema rejection, got %v", err)
 			}
 		})

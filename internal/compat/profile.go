@@ -41,18 +41,25 @@ type Error struct {
 	Detail string
 }
 
-func (e *Error) Error() string                    { return e.Code + ": " + e.Detail }
-func Fail(code, format string, args ...any) error { return &Error{code, fmt.Sprintf(format, args...)} }
+func (e *Error) Error() string { return e.Code + ": " + e.Detail }
+
+func Fail(
+	code, format string,
+	args ...any,
+) error {
+	return &Error{code, fmt.Sprintf(format, args...)}
+}
+
 func Wrap(code string, err error) error {
 	if err == nil {
 		return nil
 	}
-	var tagged *Error
-	if errors.As(err, &tagged) {
+	if _, ok := errors.AsType[*Error](err); ok {
 		return err
 	}
 	return Fail(code, "%v", err)
 }
+
 func Load() (Profile, error) {
 	data, err := profileFS.ReadFile("profile.json")
 	if err != nil {
@@ -64,6 +71,7 @@ func Load() (Profile, error) {
 	}
 	return p, nil
 }
+
 func (p Profile) Host() error {
 	tuple := runtime.GOOS + "/" + runtime.GOARCH
 	ok := false
@@ -73,10 +81,16 @@ func (p Profile) Host() error {
 		}
 	}
 	if !ok {
-		return Fail("E_HOST_UNSUPPORTED", "%s has no native-qualified profile; qualified hosts: %v", tuple, p.QualifiedHosts)
+		return Fail(
+			"E_HOST_UNSUPPORTED",
+			"%s has no native-qualified profile; qualified hosts: %v",
+			tuple,
+			p.QualifiedHosts,
+		)
 	}
 	return hostVersion()
 }
+
 func (p Profile) SBX(version, revision string) error {
 	for _, v := range p.QualifiedSBXVersions {
 		if version == v && revision != "" && p.QualifiedSBXRevisions[version] == revision {
@@ -95,22 +109,15 @@ func parseSemver(s string) (semver, error) {
 	var out semver
 	s = strings.TrimPrefix(strings.TrimSpace(s), "v")
 	if strings.Contains(s, "+") {
-		return out, fmt.Errorf("build metadata is not accepted in a Devsy version")
+		return out, errors.New("build metadata is not accepted in a Devsy version")
 	}
 	number, pre, hasPre := strings.Cut(s, "-")
 	parts := strings.Split(number, ".")
 	if len(parts) != 3 {
-		return out, fmt.Errorf("expected one semantic version")
+		return out, errors.New("expected one semantic version")
 	}
-	for i, v := range parts {
-		if v == "" || (len(v) > 1 && v[0] == '0') {
-			return out, fmt.Errorf("invalid semantic version")
-		}
-		n, err := strconv.ParseUint(v, 10, 64)
-		if err != nil {
-			return out, err
-		}
-		out.core[i] = n
+	if err := parseCore(parts, &out); err != nil {
+		return out, err
 	}
 	if !hasPre {
 		return out, nil
@@ -118,10 +125,24 @@ func parseSemver(s string) (semver, error) {
 	out.pre = strings.Split(pre, ".")
 	for _, id := range out.pre {
 		if !validPrereleaseIdentifier(id) {
-			return semver{}, fmt.Errorf("invalid semantic version prerelease")
+			return semver{}, errors.New("invalid semantic version prerelease")
 		}
 	}
 	return out, nil
+}
+
+func parseCore(parts []string, out *semver) error {
+	for i, v := range parts {
+		if v == "" || (len(v) > 1 && v[0] == '0') {
+			return errors.New("invalid semantic version")
+		}
+		n, err := strconv.ParseUint(v, 10, 64)
+		if err != nil {
+			return err
+		}
+		out.core[i] = n
+	}
+	return nil
 }
 
 func validPrereleaseIdentifier(id string) bool {
@@ -132,13 +153,19 @@ func validPrereleaseIdentifier(id string) bool {
 	for _, c := range id {
 		switch {
 		case c >= '0' && c <= '9':
-		case (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '-':
+		case validPrereleaseLetter(c):
 			numeric = false
 		default:
 			return false
 		}
 	}
-	return !numeric || id == "0" || id[0] != '0'
+	return !numeric || validNumericIdentifier(id)
+}
+
+func validNumericIdentifier(id string) bool { return id == "0" || id[0] != '0' }
+
+func validPrereleaseLetter(c rune) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '-'
 }
 
 func compareSemver(a, b semver) int {
@@ -151,25 +178,36 @@ func compareSemver(a, b semver) int {
 		}
 	}
 	if len(a.pre) == 0 || len(b.pre) == 0 {
-		switch {
-		case len(a.pre) == len(b.pre):
-			return 0
-		case len(a.pre) == 0:
-			return 1
-		default:
-			return -1
-		}
+		return compareRelease(a.pre, b.pre)
 	}
-	for i := 0; i < len(a.pre) && i < len(b.pre); i++ {
-		if c := comparePrereleaseIdentifier(a.pre[i], b.pre[i]); c != 0 {
+	return comparePrereleases(a.pre, b.pre)
+}
+
+func comparePrereleases(a, b []string) int {
+	for i := 0; i < len(a) && i < len(b); i++ {
+		if c := comparePrereleaseIdentifier(a[i], b[i]); c != 0 {
 			return c
 		}
 	}
 	switch {
-	case len(a.pre) < len(b.pre):
+	case len(a) < len(b):
 		return -1
-	case len(a.pre) > len(b.pre):
+	case len(a) > len(b):
 		return 1
+	}
+	return 0
+}
+
+func compareRelease(a, b []string) int {
+	if len(a) == 0 || len(b) == 0 {
+		switch {
+		case len(a) == len(b):
+			return 0
+		case len(a) == 0:
+			return 1
+		default:
+			return -1
+		}
 	}
 	return 0
 }
@@ -193,21 +231,27 @@ func comparePrereleaseIdentifier(a, b string) int {
 	}
 	return strings.Compare(a, b)
 }
+
 func HostEnvironment() []string {
 	inherited := os.Environ()
 	result := make([]string, 0, len(inherited))
 	for _, entry := range inherited {
 		key, _, _ := strings.Cut(entry, "=")
-		if strings.EqualFold(key, "COMMAND") || strings.EqualFold(key, "DEVSY_PROVIDER_CANCEL_FILE") {
+		if strings.EqualFold(key, "COMMAND") ||
+			strings.EqualFold(key, "DEVSY_PROVIDER_CANCEL_FILE") {
 			continue
 		}
 		result = append(result, entry)
 	}
 	return result
 }
+
 func (p Profile) Devsy(ctx context.Context, path string) error {
 	if p.MinimumDevsyVersion == "" {
-		return Fail("E_DEVSY_VERSION", "no published Devsy release containing required core changes is qualified")
+		return Fail(
+			"E_DEVSY_VERSION",
+			"no published Devsy release containing required core changes is qualified",
+		)
 	}
 	minimum, err := parseSemver(p.MinimumDevsyVersion)
 	if err != nil {
@@ -232,52 +276,80 @@ func (p Profile) Devsy(ctx context.Context, path string) error {
 		return Fail("E_DEVSY_VERSION", "development Devsy v0.0.0 is not a qualified release")
 	}
 	if compareSemver(version, minimum) < 0 {
-		return Fail("E_DEVSY_VERSION", "Devsy %s is older than required %s", strings.TrimSpace(string(out)), p.MinimumDevsyVersion)
+		return Fail(
+			"E_DEVSY_VERSION",
+			"Devsy %s is older than required %s",
+			strings.TrimSpace(string(out)),
+			p.MinimumDevsyVersion,
+		)
 	}
 	return nil
 }
+
 func (p Profile) RequireDaemonSchema() error {
 	if p.DaemonSchema == "" || len(p.QualifiedDaemonVersions) == 0 {
-		return Fail("E_SBX_VERSION", "successful-server daemon version and client/daemon tuple have not been qualified")
+		return Fail(
+			"E_SBX_VERSION",
+			"successful-server daemon version and client/daemon tuple have not been qualified",
+		)
 	}
 	return nil
 }
+
 func (p Profile) RequireInventorySchema() error {
 	if len(p.InventoryStates) == 0 {
-		return Fail("E_SBX_SCHEMA", "successful-server inventory state schema has not been qualified")
+		return Fail(
+			"E_SBX_SCHEMA",
+			"successful-server inventory state schema has not been qualified",
+		)
 	}
 	return nil
 }
+
 func (p Profile) RequireShellSchema() error {
 	if p.ShellSettingSchema != ShellSettingSchemaV0501 {
 		return Fail("E_SHELL_OVERRIDE", "effective shell shortcut settings have not been qualified")
 	}
 	return nil
 }
+
 func (p Profile) RequireOperationResultSchema() error {
 	if p.OperationResultSchema != OperationResultSchemaV0501 {
-		return Fail("E_SBX_SCHEMA", "successful sbx stop/remove JSON has no qualified result schema")
+		return Fail(
+			"E_SBX_SCHEMA",
+			"successful sbx stop/remove JSON has no qualified result schema",
+		)
 	}
 	return nil
 }
+
 func MeasuredDiskSizingSchema(host, version, revision string) string {
-	if host == "darwin/arm64" && version == "v0.50.1" && revision == "ddb0268d7124b9cf98955d0b08ffd71a0dfcebe4" {
+	if host == "darwin/arm64" && version == "v0.50.1" &&
+		revision == "ddb0268d7124b9cf98955d0b08ffd71a0dfcebe4" {
 		return DiskSizingSchemaDarwinARM64V0501
 	}
 	return ""
 }
+
 func (p Profile) RequireDiskSizingQualification() error {
 	host := runtime.GOOS + "/" + runtime.GOARCH
 	if len(p.QualifiedSBXVersions) != 1 {
-		return Fail("E_GUEST_CAPABILITY", "root and Docker filesystem capacity overhead is not qualified for this host")
+		return Fail(
+			"E_GUEST_CAPABILITY",
+			"root and Docker filesystem capacity overhead is not qualified for this host",
+		)
 	}
 	version := p.QualifiedSBXVersions[0]
 	expected := MeasuredDiskSizingSchema(host, version, p.QualifiedSBXRevisions[version])
 	if expected == "" || p.DiskSizingSchemas[host] != expected {
-		return Fail("E_GUEST_CAPABILITY", "root and Docker filesystem capacity overhead is not qualified for this host")
+		return Fail(
+			"E_GUEST_CAPABILITY",
+			"root and Docker filesystem capacity overhead is not qualified for this host",
+		)
 	}
 	return nil
 }
+
 func ConfigRoot() (string, error) {
 	base, err := os.UserConfigDir()
 	if err != nil {

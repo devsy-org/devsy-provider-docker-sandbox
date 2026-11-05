@@ -1,0 +1,19 @@
+name: Native distribution
+on:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+      core_ref:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  package-and-install:
+    name: Package, manifest and alias installation
+    uses: ./.github/workflows/native.yml
+    with:
+      version: ${{ inputs.version }}
+      core_ref: ${{ inputs.core_ref }}

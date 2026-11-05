@@ -17,6 +17,7 @@ permissions:
 jobs:
   plan:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       hosts: ${{ steps.matrix.outputs.hosts }}
     env:
@@ -107,6 +108,7 @@ jobs:
   evidence:
     needs: [plan, vm]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     environment: native-sandbox-qualification
     env:
       CANDIDATE: ${{ github.sha }}

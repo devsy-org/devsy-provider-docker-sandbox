@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -19,7 +20,9 @@ import (
 //go:embed provider.yaml.tmpl
 var manifestTemplate string
 
-var releaseTag = regexp.MustCompile(`^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:[-+][0-9A-Za-z.-]+)?$`)
+var releaseTag = regexp.MustCompile(
+	`^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:[-+][0-9A-Za-z.-]+)?$`,
+)
 
 type binary struct {
 	OS       string
@@ -51,7 +54,10 @@ func Generate(tag, directory, profilePath string) (Metadata, error) {
 	if !releaseTag.MatchString(tag) {
 		return Metadata{}, fmt.Errorf("invalid release tag %q", tag)
 	}
-	profileBytes, err := os.ReadFile(profilePath)
+	profileBytes, err := fs.ReadFile(
+		os.DirFS(filepath.Dir(profilePath)),
+		filepath.Base(profilePath),
+	)
 	if err != nil {
 		return Metadata{}, fmt.Errorf("read compatibility profile: %w", err)
 	}
@@ -64,96 +70,198 @@ func Generate(tag, directory, profilePath string) (Metadata, error) {
 	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
 		return Metadata{}, errors.New("compatibility profile contains trailing JSON")
 	}
-	if !releaseTag.MatchString(qualified.MinimumDevsyVersion) || len(qualified.QualifiedSBXVersions) == 0 || len(qualified.QualifiedSBXRevisions) == 0 || len(qualified.QualifiedDaemonVersions) == 0 || qualified.DaemonSchema == "" || qualified.OperationResultSchema != compat.OperationResultSchemaV0501 || qualified.ShellSettingSchema != compat.ShellSettingSchemaV0501 || len(qualified.InventoryStates) == 0 {
-		return Metadata{}, errors.New("compatibility profile is unqualified: measured core, sbx daemon, operation results, inventory and settings evidence is required")
+	if err := validateProfile(qualified); err != nil {
+		return Metadata{}, err
 	}
+	binaries, err := collectBinaries(qualified, directory)
+	if err != nil {
+		return Metadata{}, err
+	}
+	manifest, err := renderManifest(tag, binaries)
+	if err != nil {
+		return Metadata{}, err
+	}
+	return Metadata{
+		Manifest:  manifest,
+		Checksums: renderChecksums(binaries),
+		Profile:   profileBytes,
+	}, nil
+}
+
+func validateProfile(qualified profile) error {
+	if err := validateProfileFields(qualified); err != nil {
+		return err
+	}
+	if err := validateVersions(qualified); err != nil {
+		return err
+	}
+	return validateStates(qualified)
+}
+
+func validateProfileFields(qualified profile) error {
+	if !releaseTag.MatchString(qualified.MinimumDevsyVersion) ||
+		len(qualified.QualifiedSBXVersions) == 0 ||
+		len(qualified.QualifiedSBXRevisions) == 0 ||
+		len(qualified.QualifiedDaemonVersions) == 0 ||
+		qualified.DaemonSchema == "" ||
+		!validSchemas(qualified) ||
+		len(qualified.InventoryStates) == 0 {
+		return errors.New(
+			"compatibility profile is unqualified: measured core, sbx daemon, operation results, " +
+				"inventory and settings evidence is required",
+		)
+	}
+	return nil
+}
+
+func validSchemas(p profile) bool {
+	return p.OperationResultSchema == compat.OperationResultSchemaV0501 &&
+		p.ShellSettingSchema == compat.ShellSettingSchemaV0501
+}
+
+func validateVersions(qualified profile) error {
 	for _, version := range qualified.QualifiedSBXVersions {
-		if !releaseTag.MatchString(version) {
-			return Metadata{}, fmt.Errorf("invalid qualified sbx version %q", version)
-		}
-		if qualified.QualifiedSBXRevisions[version] == "" {
-			return Metadata{}, fmt.Errorf("qualified sbx client %s has no measured revision", version)
-		}
-		daemonVersions := qualified.QualifiedDaemonVersions[version]
-		if len(daemonVersions) == 0 {
-			return Metadata{}, fmt.Errorf("qualified sbx client %s has no measured daemon versions", version)
-		}
-		for _, daemonVersion := range daemonVersions {
-			if daemonVersion == "" {
-				return Metadata{}, fmt.Errorf("invalid qualified daemon version %q", daemonVersion)
-			}
+		if err := validateVersion(qualified, version); err != nil {
+			return err
 		}
 	}
-	if len(qualified.QualifiedDaemonVersions) != len(qualified.QualifiedSBXVersions) || len(qualified.QualifiedSBXRevisions) != len(qualified.QualifiedSBXVersions) {
-		return Metadata{}, errors.New("qualified daemon versions and client revisions must match qualified client versions")
+	if len(qualified.QualifiedDaemonVersions) != len(qualified.QualifiedSBXVersions) ||
+		len(qualified.QualifiedSBXRevisions) != len(qualified.QualifiedSBXVersions) {
+		return errors.New(
+			"qualified daemon versions and client revisions must match qualified client versions",
+		)
 	}
+	return nil
+}
+
+func validateVersion(qualified profile, version string) error {
+	if !releaseTag.MatchString(version) {
+		return fmt.Errorf("invalid qualified sbx version %q", version)
+	}
+	if qualified.QualifiedSBXRevisions[version] == "" {
+		return fmt.Errorf(
+			"qualified sbx client %s has no measured revision",
+			version,
+		)
+	}
+	daemonVersions := qualified.QualifiedDaemonVersions[version]
+	if len(daemonVersions) == 0 {
+		return fmt.Errorf(
+			"qualified sbx client %s has no measured daemon versions",
+			version,
+		)
+	}
+	for _, daemonVersion := range daemonVersions {
+		if daemonVersion == "" {
+			return fmt.Errorf("invalid qualified daemon version %q", daemonVersion)
+		}
+	}
+	return nil
+}
+
+func validateStates(qualified profile) error {
 	states := map[string]bool{}
 	for observed, classified := range qualified.InventoryStates {
 		if observed == "" {
-			return Metadata{}, errors.New("empty observed inventory state")
+			return errors.New("empty observed inventory state")
 		}
 		switch classified {
 		case "running", "stopped", "transitional", "failed":
 			states[classified] = true
 		default:
-			return Metadata{}, fmt.Errorf("invalid inventory state classification %q", classified)
+			return fmt.Errorf("invalid inventory state classification %q", classified)
 		}
 	}
 	if !states["running"] || !states["stopped"] {
-		return Metadata{}, errors.New("compatibility profile requires observed running and stopped inventory states")
+		return errors.New(
+			"compatibility profile requires observed running and stopped inventory states",
+		)
 	}
+	return nil
+}
+
+func collectBinaries(qualified profile, directory string) ([]binary, error) {
+	if len(qualified.QualifiedHosts) == 0 {
+		return nil, errors.New("compatibility profile contains no qualified native hosts")
+	}
+	if len(qualified.QualifiedSBXVersions) != 1 {
+		return nil, errors.New("disk sizing requires one measured sbx client version")
+	}
+	seen := make(map[string]bool, len(qualified.QualifiedHosts))
+	binaries := make([]binary, 0, len(qualified.QualifiedHosts))
+	for _, host := range qualified.QualifiedHosts {
+		item, err := collectBinary(qualified, directory, host, seen)
+		if err != nil {
+			return nil, err
+		}
+		binaries = append(binaries, item)
+	}
+	if len(qualified.DiskSizingSchemas) != len(qualified.QualifiedHosts) {
+		return nil, errors.New("qualified hosts require exact measured disk sizing schemas")
+	}
+	return binaries, nil
+}
+
+func collectBinary(
+	qualified profile,
+	directory, host string,
+	seen map[string]bool,
+) (binary, error) {
 	platforms := map[string]binary{
 		"darwin/arm64":  {OS: "darwin", Arch: "arm64"},
 		"windows/amd64": {OS: "windows", Arch: "amd64"},
 		"linux/amd64":   {OS: "linux", Arch: "amd64"},
 		"linux/arm64":   {OS: "linux", Arch: "arm64"},
 	}
-	if len(qualified.QualifiedHosts) == 0 {
-		return Metadata{}, errors.New("compatibility profile contains no qualified native hosts")
+	item, ok := platforms[host]
+	if !ok || seen[host] {
+		return binary{}, fmt.Errorf("unsupported or duplicate qualified host %q", host)
 	}
-	if len(qualified.QualifiedSBXVersions) != 1 {
-		return Metadata{}, errors.New("disk sizing requires one measured sbx client version")
+	seen[host] = true
+	version := qualified.QualifiedSBXVersions[0]
+	expected := compat.MeasuredDiskSizingSchema(
+		host,
+		version,
+		qualified.QualifiedSBXRevisions[version],
+	)
+	if expected == "" || qualified.DiskSizingSchemas[host] != expected {
+		return binary{}, fmt.Errorf("unqualified disk sizing schema for host %q", host)
 	}
-	seen := make(map[string]bool, len(qualified.QualifiedHosts))
-	binaries := make([]binary, 0, len(qualified.QualifiedHosts))
-	var checksums bytes.Buffer
-	for _, host := range qualified.QualifiedHosts {
-		item, ok := platforms[host]
-		if !ok || seen[host] {
-			return Metadata{}, fmt.Errorf("unsupported or duplicate qualified host %q", host)
-		}
-		seen[host] = true
-		version := qualified.QualifiedSBXVersions[0]
-		expected := compat.MeasuredDiskSizingSchema(host, version, qualified.QualifiedSBXRevisions[version])
-		if expected == "" || qualified.DiskSizingSchemas[host] != expected {
-			return Metadata{}, fmt.Errorf("unqualified disk sizing schema for host %q", host)
-		}
-		item.Name = "devsy-provider-docker-sandbox-" + item.OS + "-" + item.Arch
-		if item.OS == "windows" {
-			item.Name += ".exe"
-		}
-		item.Checksum, err = fileChecksum(filepath.Join(directory, item.Name))
-		if err != nil {
-			return Metadata{}, fmt.Errorf("artifact %s: %w", item.Name, err)
-		}
-		fmt.Fprintf(&checksums, "%s  %s\n", item.Checksum, item.Name)
-		binaries = append(binaries, item)
+	item.Name = "devsy-provider-docker-sandbox-" + item.OS + "-" + item.Arch
+	if item.OS == "windows" {
+		item.Name += ".exe"
 	}
-	if len(qualified.DiskSizingSchemas) != len(qualified.QualifiedHosts) {
-		return Metadata{}, errors.New("qualified hosts require exact measured disk sizing schemas")
+	checksum, err := fileChecksum(filepath.Join(directory, item.Name))
+	if err != nil {
+		return binary{}, fmt.Errorf("artifact %s: %w", item.Name, err)
 	}
+	item.Checksum = checksum
+	return item, nil
+}
+
+type manifestData struct {
+	Tag      string
+	Binaries []binary
+}
+
+func renderManifest(tag string, binaries []binary) ([]byte, error) {
 	parsed, err := template.New("provider").Option("missingkey=error").Parse(manifestTemplate)
 	if err != nil {
-		return Metadata{}, err
+		return nil, err
 	}
 	var manifest bytes.Buffer
-	if err := parsed.Execute(&manifest, struct {
-		Tag      string
-		Binaries []binary
-	}{Tag: tag, Binaries: binaries}); err != nil {
-		return Metadata{}, err
+	if err := parsed.Execute(&manifest, manifestData{Tag: tag, Binaries: binaries}); err != nil {
+		return nil, err
 	}
-	return Metadata{Manifest: manifest.Bytes(), Checksums: checksums.Bytes(), Profile: profileBytes}, nil
+	return manifest.Bytes(), nil
+}
+
+func renderChecksums(binaries []binary) []byte {
+	var checksums bytes.Buffer
+	for _, item := range binaries {
+		fmt.Fprintf(&checksums, "%s  %s\n", item.Checksum, item.Name)
+	}
+	return checksums.Bytes()
 }
 
 func fileChecksum(path string) (string, error) {
@@ -164,7 +272,7 @@ func fileChecksum(path string) (string, error) {
 	if !info.Mode().IsRegular() || info.Size() == 0 {
 		return "", errors.New("artifact must be a nonempty regular file")
 	}
-	file, err := os.Open(path)
+	file, err := os.DirFS(filepath.Dir(path)).Open(filepath.Base(path))
 	if err != nil {
 		return "", err
 	}

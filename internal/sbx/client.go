@@ -5,17 +5,21 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/devsy-org/devsy-provider-docker-sandbox/internal/compat"
-	"github.com/devsy-org/devsy-provider-docker-sandbox/internal/state"
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/devsy-org/devsy-provider-docker-sandbox/internal/compat"
+	"github.com/devsy-org/devsy-provider-docker-sandbox/internal/state"
 )
 
-const maxStdout = 16 << 20
-const maxStderr = 64 << 10
+const (
+	maxStdout = 16 << 20
+	maxStderr = 64 << 10
+)
 
 type Client struct {
 	Path  string
@@ -51,34 +55,38 @@ func (b *stderrTail) Write(p []byte) (int, error) {
 	}
 	return n, nil
 }
+
 func observedLoginFailure(data []byte) bool {
-	return strings.ReplaceAll(strings.TrimSpace(string(data)), "\r\n", "\n") == `error: not signed in to Docker
+	return strings.ReplaceAll(
+		strings.TrimSpace(string(data)),
+		"\r\n",
+		"\n",
+	) == `error: not signed in to Docker
   try: sbx login`
 }
+
 func childEnv(extra []string) []string {
 	inherited := os.Environ()
 	env := make([]string, 0, len(inherited)+len(extra))
 	for _, e := range inherited {
 		key, _, _ := strings.Cut(e, "=")
-		if strings.EqualFold(key, "COMMAND") || strings.EqualFold(key, "DEVSY_PROVIDER_CANCEL_FILE") || strings.EqualFold(key, "DOCKER_SANDBOXES_ROOT_SIZE") || strings.EqualFold(key, "DOCKER_SANDBOXES_DOCKER_SIZE") {
+		if strings.EqualFold(key, "COMMAND") ||
+			strings.EqualFold(key, "DEVSY_PROVIDER_CANCEL_FILE") ||
+			strings.EqualFold(key, "DOCKER_SANDBOXES_ROOT_SIZE") ||
+			strings.EqualFold(key, "DOCKER_SANDBOXES_DOCKER_SIZE") {
 			continue
 		}
 		env = append(env, e)
 	}
 	return append(env, extra...)
 }
-func (c Client) newCommand(ctx context.Context, args []string, extra []string) (*exec.Cmd, func() error, error) {
-	cwd, cleanup, e := c.Store.ControlCWD()
-	if e != nil {
-		return nil, nil, e
-	}
-	cmd := exec.CommandContext(ctx, c.Path, args...)
-	cmd.Dir = cwd
-	cmd.Env = childEnv(extra)
-	cmd.WaitDelay = 5 * time.Second
-	return cmd, cleanup, nil
-}
-func (c Client) Control(ctx context.Context, limit time.Duration, args []string, extra []string) (data []byte, result error) {
+
+func (c Client) Control(
+	ctx context.Context,
+	limit time.Duration,
+	args []string,
+	extra []string,
+) (data []byte, result error) {
 	ctx, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
 	cmd, cleanup, e := c.newCommand(ctx, args, extra)
@@ -105,9 +113,17 @@ func (c Client) Control(ctx context.Context, limit time.Duration, args []string,
 			return nil, ctx.Err()
 		}
 		if observedLoginFailure(stderr.data) {
-			return nil, compat.Fail("E_SBX_AUTH", "Docker Sandboxes sign-in required; run sbx login outside Devsy")
+			return nil, compat.Fail(
+				"E_SBX_AUTH",
+				"Docker Sandboxes sign-in required; run sbx login outside Devsy",
+			)
 		}
-		return nil, fmt.Errorf("sbx %s failed: %w; stderr: %s", args[0], e, strings.TrimSpace(string(stderr.data)))
+		return nil, fmt.Errorf(
+			"sbx %s failed: %w; stderr: %s",
+			args[0],
+			e,
+			strings.TrimSpace(string(stderr.data)),
+		)
 	}
 	return stdout.Bytes(), nil
 }
@@ -123,51 +139,26 @@ func (p *Process) Wait(ctx context.Context) error {
 	case err := <-p.done:
 		return err
 	case <-ctx.Done():
-		var terminationErr error
-		if p.Cmd.Stdin != nil && p.Cmd.Stdin != os.Stdin {
-			if input, ok := p.Cmd.Stdin.(io.Closer); ok {
-				if err := input.Close(); err != nil && !errors.Is(err, os.ErrClosed) {
-					terminationErr = errors.Join(terminationErr, compat.Wrap("E_STORAGE", err))
-				}
-			}
-		}
-		if err := interrupt(p.Cmd.Process); err != nil && !errors.Is(err, os.ErrProcessDone) {
-			terminationErr = errors.Join(terminationErr, compat.Wrap("E_SBX_UNAVAILABLE", err))
-		}
-		reaped := func(err error) error {
-			var tagged *compat.Error
-			if errors.As(err, &tagged) {
-				terminationErr = errors.Join(terminationErr, err)
-			}
-			return errors.Join(ctx.Err(), terminationErr)
-		}
-		timer := time.NewTimer(2 * time.Second)
-		defer timer.Stop()
-		select {
-		case err := <-p.done:
-			return reaped(err)
-		case <-timer.C:
-			if err := p.Cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
-				terminationErr = errors.Join(terminationErr, compat.Wrap("E_SBX_UNAVAILABLE", err))
-			}
-		}
-		timer.Reset(5 * time.Second)
-		select {
-		case err := <-p.done:
-			return reaped(err)
-		case <-timer.C:
-			return errors.Join(compat.Fail("E_UNCLEAN_ATTEMPT", "owned sbx client could not be reaped"), terminationErr)
-		}
+		return p.cancelAndWait(ctx)
 	}
 }
-func (c Client) Start(ctx context.Context, args []string, extra []string, stdin io.Reader, stdout, stderr io.Writer) (*Process, error) {
-	cmd, cleanup, e := c.newCommand(context.Background(), args, extra)
+
+type StartRequest struct {
+	Args   []string
+	Extra  []string
+	Stdin  io.Reader
+	Stdout io.Writer
+	Stderr io.Writer
+}
+
+func (c Client) Start(ctx context.Context, request StartRequest) (*Process, error) {
+	cmd, cleanup, e := c.newCommand(context.Background(), request.Args, request.Extra)
 	if e != nil {
 		return nil, e
 	}
-	cmd.Stdin = stdin
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
+	cmd.Stdin = request.Stdin
+	cmd.Stdout = request.Stdout
+	cmd.Stderr = request.Stderr
 	if e = ctx.Err(); e != nil {
 		return nil, errors.Join(e, compat.Wrap("E_STORAGE", cleanup()))
 	}
@@ -181,10 +172,74 @@ func (c Client) Start(ctx context.Context, args []string, extra []string, stdin 
 	}()
 	return p, nil
 }
+
+func (c Client) newCommand(
+	ctx context.Context,
+	args []string,
+	extra []string,
+) (*exec.Cmd, func() error, error) {
+	if !filepath.IsAbs(c.Path) {
+		return nil, nil, errors.New("sbx executable path must be absolute")
+	}
+	cwd, cleanup, e := c.Store.ControlCWD()
+	if e != nil {
+		return nil, nil, e
+	}
+	cmd := exec.CommandContext(ctx, c.Path, args...)
+	cmd.Dir = cwd
+	cmd.Env = childEnv(extra)
+	cmd.WaitDelay = 5 * time.Second
+	return cmd, cleanup, nil
+}
+
 func ExitCode(err error) (int, bool) {
-	var x *exec.ExitError
-	if errors.As(err, &x) {
+	if x, ok := errors.AsType[*exec.ExitError](err); ok {
 		return x.ExitCode(), true
 	}
 	return 0, false
+}
+
+func (p *Process) cancelAndWait(ctx context.Context) error {
+	terminationErr := p.interruptOwned()
+	reaped := func(err error) error {
+		if _, ok := errors.AsType[*compat.Error](err); ok {
+			terminationErr = errors.Join(terminationErr, err)
+		}
+		return errors.Join(ctx.Err(), terminationErr)
+	}
+	timer := time.NewTimer(2 * time.Second)
+	defer timer.Stop()
+	select {
+	case err := <-p.done:
+		return reaped(err)
+	case <-timer.C:
+		if err := p.Cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+			terminationErr = errors.Join(terminationErr, compat.Wrap("E_SBX_UNAVAILABLE", err))
+		}
+	}
+	timer.Reset(5 * time.Second)
+	select {
+	case err := <-p.done:
+		return reaped(err)
+	case <-timer.C:
+		return errors.Join(
+			compat.Fail("E_UNCLEAN_ATTEMPT", "owned sbx client could not be reaped"),
+			terminationErr,
+		)
+	}
+}
+
+func (p *Process) interruptOwned() error {
+	var terminationErr error
+	if p.Cmd.Stdin != nil && p.Cmd.Stdin != os.Stdin {
+		if input, ok := p.Cmd.Stdin.(io.Closer); ok {
+			if err := input.Close(); err != nil && !errors.Is(err, os.ErrClosed) {
+				terminationErr = errors.Join(terminationErr, compat.Wrap("E_STORAGE", err))
+			}
+		}
+	}
+	if err := interrupt(p.Cmd.Process); err != nil && !errors.Is(err, os.ErrProcessDone) {
+		terminationErr = errors.Join(terminationErr, compat.Wrap("E_SBX_UNAVAILABLE", err))
+	}
+	return terminationErr
 }

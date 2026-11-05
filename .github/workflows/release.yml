@@ -20,6 +20,7 @@ permissions:
 jobs:
   source:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -37,6 +38,8 @@ jobs:
           [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
           [[ "$CORE_REF" =~ ^[0-9a-f]{40}$ ]]
           test "$(git rev-parse "refs/tags/$VERSION^{commit}")" = "$GITHUB_SHA"
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+          jq -e --arg version "${VERSION#v}" '.["."] == $version' .release-please-manifest.json
           tag_object="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$VERSION" --jq .object.sha)"
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag_object" --jq '.verification.verified')" = true
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$GITHUB_SHA" --jq '.verification.verified')" = true
@@ -51,22 +54,23 @@ jobs:
           fi
           test "$core_object" = "$CORE_REF"
           test "$(gh api "repos/devsy-org/devsy/git/commits/$CORE_REF" --jq '.verification.verified')" = true
-  package:
+  distribution:
     needs: source
-    uses: ./.github/workflows/native.yml
+    uses: ./.github/workflows/distribution.yml
     with:
       version: ${{ inputs.version }}
       core_ref: ${{ inputs.core_ref }}
   qualification:
-    needs: package
+    needs: distribution
     uses: ./.github/workflows/e2e.yml
     with:
       version: ${{ inputs.version }}
       core_ref: ${{ inputs.core_ref }}
       core_tag: ${{ inputs.core_tag }}
   publish:
-    needs: [package, qualification]
+    needs: [distribution, qualification]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     environment: provider-release
     permissions:
       contents: write

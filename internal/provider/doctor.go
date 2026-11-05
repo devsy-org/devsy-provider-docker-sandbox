@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+
 	"github.com/devsy-org/devsy-provider-docker-sandbox/internal/compat"
 	"github.com/devsy-org/devsy-provider-docker-sandbox/internal/sbx"
 	"github.com/devsy-org/devsy-provider-docker-sandbox/internal/state"
-	"os"
 )
 
 type Diagnosis struct {
@@ -22,12 +23,9 @@ type Diagnosis struct {
 
 func (p Provider) Doctor(ctx context.Context) ([]byte, error) {
 	out := Diagnosis{SchemaVersion: 1, MachineKey: p.Store.Key, Compatibility: p.Profile}
-	r, e := p.Store.Load()
-	if e != nil && !errors.Is(e, os.ErrNotExist) {
+	r, e := p.doctorRecord(&out)
+	if e != nil {
 		return nil, e
-	}
-	if e == nil {
-		out.Record = &r
 	}
 	a, e := p.Store.Attempts()
 	if e != nil {
@@ -43,7 +41,19 @@ func (p Provider) Doctor(ctx context.Context) ([]byte, error) {
 	}
 	return json.MarshalIndent(out, "", "  ")
 }
-func List(ctx context.Context, p compat.Profile) ([]byte, error) {
+
+func (p Provider) doctorRecord(out *Diagnosis) (state.Record, error) {
+	r, e := p.Store.Load()
+	if e != nil && !errors.Is(e, os.ErrNotExist) {
+		return r, e
+	}
+	if e == nil {
+		out.Record = &r
+	}
+	return r, nil
+}
+
+func List(_ context.Context, p compat.Profile) ([]byte, error) {
 	root, e := state.Root()
 	if e != nil {
 		return nil, e

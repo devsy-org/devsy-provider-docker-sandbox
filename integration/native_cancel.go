@@ -54,21 +54,24 @@ func run() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	operation := func() error {
-		return clientimplementation.RunCommandWithBinaries(ctx, clientimplementation.WorkspaceCommandConfig{
-			Command:              installed.Config.Exec.Command,
-			WorkspaceContextName: machine.Context,
-			Machine:              machine,
-			Options:              cfg.ProviderOptions(installed.Config.Name),
-			Config:               installed.Config,
-			Stdin:                bytes.NewReader(nil),
-			Stdout:               io.Discard,
-			Stderr:               os.Stderr,
-			RawStdout:            true,
-			ExtraEnv: map[string]string{
-				provider.CommandEnv:  os.Args[3],
-				config.EnvBinaryPath: os.Args[4],
+		return clientimplementation.RunCommandWithBinaries(
+			ctx,
+			clientimplementation.WorkspaceCommandConfig{
+				Command:              installed.Config.Exec.Command,
+				WorkspaceContextName: machine.Context,
+				Machine:              machine,
+				Options:              cfg.ProviderOptions(installed.Config.Name),
+				Config:               installed.Config,
+				Stdin:                bytes.NewReader(nil),
+				Stdout:               io.Discard,
+				Stderr:               os.Stderr,
+				RawStdout:            true,
+				ExtraEnv: map[string]string{
+					provider.CommandEnv:  os.Args[3],
+					config.EnvBinaryPath: os.Args[4],
+				},
 			},
-		})
+		)
 	}
 	if os.Args[1] == "run" {
 		return operation()

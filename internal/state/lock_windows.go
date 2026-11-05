@@ -6,19 +6,22 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/devsy-org/devsy-provider-docker-sandbox/internal/compat"
 	"os"
 	"os/exec"
 	"os/user"
 	"syscall"
 	"time"
 	"unsafe"
+
+	"github.com/devsy-org/devsy-provider-docker-sandbox/internal/compat"
 )
 
-var kernel32 = syscall.NewLazyDLL("kernel32.dll")
-var lockFile = kernel32.NewProc("LockFileEx")
-var unlockFile = kernel32.NewProc("UnlockFileEx")
-var moveFile = kernel32.NewProc("MoveFileExW")
+var (
+	kernel32   = syscall.NewLazyDLL("kernel32.dll")
+	lockFile   = kernel32.NewProc("LockFileEx")
+	unlockFile = kernel32.NewProc("UnlockFileEx")
+	moveFile   = kernel32.NewProc("MoveFileExW")
+)
 
 type overlapped struct {
 	Internal     uintptr
@@ -36,7 +39,15 @@ func protectDir(path string) error {
 	if current.Uid == "" {
 		return fmt.Errorf("current Windows SID unavailable")
 	}
-	cmd := exec.Command("icacls", path, "/grant:r", "*"+current.Uid+":(OI)(CI)F", "*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F", "/inheritance:r")
+	cmd := exec.Command(
+		"icacls",
+		path,
+		"/grant:r",
+		"*"+current.Uid+":(OI)(CI)F",
+		"*S-1-5-18:(OI)(CI)F",
+		"*S-1-5-32-544:(OI)(CI)F",
+		"/inheritance:r",
+	)
 	cmd.Env = compat.HostEnvironment()
 	out, e := cmd.CombinedOutput()
 	if e != nil {
@@ -72,18 +83,25 @@ func (l *Lock) Close() error {
 	if l == nil {
 		return nil
 	}
-	ok, _, unlockErr := unlockFile.Call(l.file.Fd(), 0, 0xffffffff, 0xffffffff, uintptr(unsafe.Pointer(&l.overlap)))
+	ok, _, unlockErr := unlockFile.Call(
+		l.file.Fd(),
+		0,
+		0xffffffff,
+		0xffffffff,
+		uintptr(unsafe.Pointer(&l.overlap)),
+	)
 	closeErr := l.file.Close()
 	if ok == 0 {
 		return errors.Join(unlockErr, closeErr)
 	}
 	return closeErr
 }
+
 func (s Store) Acquire(ctx context.Context, name string, shared bool) (*Lock, error) {
 	if e := s.Ensure(); e != nil {
 		return nil, e
 	}
-	f, e := os.OpenFile(s.Dir()+string(os.PathSeparator)+name+".lock", os.O_CREATE|os.O_RDWR, 0600)
+	f, e := os.OpenFile(s.Dir()+string(os.PathSeparator)+name+".lock", os.O_CREATE|os.O_RDWR, 0o600)
 	if e != nil {
 		return nil, e
 	}
@@ -93,7 +111,14 @@ func (s Store) Acquire(ctx context.Context, name string, shared bool) (*Lock, er
 		flags |= 0x2
 	}
 	for {
-		ok, _, err := lockFile.Call(f.Fd(), flags, 0, 0xffffffff, 0xffffffff, uintptr(unsafe.Pointer(&l.overlap)))
+		ok, _, err := lockFile.Call(
+			f.Fd(),
+			flags,
+			0,
+			0xffffffff,
+			0xffffffff,
+			uintptr(unsafe.Pointer(&l.overlap)),
+		)
 		if ok != 0 {
 			return l, nil
 		}
@@ -107,6 +132,7 @@ func (s Store) Acquire(ctx context.Context, name string, shared bool) (*Lock, er
 		}
 	}
 }
+
 func (s Store) TryAcquire(name string, shared bool) (*Lock, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

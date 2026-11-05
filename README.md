@@ -2,9 +2,9 @@
 
 This provider gives each Devsy machine one local Docker Sandboxes microVM. Devsy runs its Linux agent and built-in Docker driver inside that VM. A workspace devcontainer, its builds, Features and Compose services use the VM's private Docker Engine, not the workstation's Docker Engine.
 
-**Release status:** No host tuple is qualified yet. There is no published provider manifest or supported host claim. A successful provider build and the `sbx` client reporting its version do not establish that a VM can start. The release generator refuses the unqualified compatibility profile. Do not install an unreleased build as a supported provider.
+**Release status:** The reviewed compatibility profile currently lists macOS arm64 with `sbx` v0.50.1. There is no published provider manifest or supported host claim. A successful provider build and the `sbx` client reporting its version do not establish that a VM can start. The release generator accepts only hosts listed in the reviewed profile. Publication remains gated on a signed provider tag, compatible published Devsy core release, successful native VM jobs, reviewed evidence and the protected `provider-release` environment. Do not install an unreleased build as a supported provider.
 
-## Host prerequisites and installation
+## Getting started
 
 The initial qualification targets are macOS 14 or later on Apple silicon with platform virtualization, Windows 11 amd64 with Windows Hypervisor Platform enabled, and Ubuntu 24.04 or later on amd64 or arm64 with accessible KVM. A VM host also needs nested virtualization. These are qualification targets, not evidence of support. Intel macOS, Windows arm64, WSL and other Linux distributions are not advertised.
 
@@ -19,6 +19,8 @@ devsy workspace up https://github.com/devcontainers/samples --provider docker-sa
 
 A local folder is uploaded through Devsy's remote machine source flow. It is not mounted from the workstation into the sandbox. Git-backed workspaces are cloned into the guest and keep edits in the guest until you push or explicitly export them. Use the normal Devsy SSH, editor and forwarding commands to access the final devcontainer. Publishing a Compose port inside the VM does not by itself open a workstation port.
 
+## Configuration
+
 Set resource options before creating a machine:
 
 ```sh
@@ -31,7 +33,7 @@ Normal stop/start preserves the VM's identity, source, containers, images and vo
 
 In `--single-machine` mode, deleting the last workspace also deletes the shared VM and all guest data. Back up anything you need before deletion.
 
-## Security and network authority
+### Security and network authority
 
 The provider creates a mountless sandbox and does not provide the host project directory to `sbx`. That does not remove authority already granted by Docker Sandboxes network policy, registry credentials, proxy, host SSH agent or MCP integrations. Devsy may independently forward Git and Docker credentials, SSH and signing agents or configured secrets. Review both systems' settings. Do not assume clearing the client `SSH_AUTH_SOCK` disables a daemon-configured integration. The provider does not suppress or reconfigure host integrations.
 
@@ -39,7 +41,7 @@ The guest Docker socket belongs to the VM. Devsy does not install a missing Dock
 
 Projects that need authenticated forward-proxy HTTPS must explicitly read the VM's proxy settings, decode its public proxy CA to a generated file outside source control, add that file to the project build context, install it alongside existing roots **before** the first networked build step, and pass HTTP, HTTPS and no-proxy build arguments. Set container runtime proxy variables and install trust in the target image or application as appropriate. Rebuild when the CA rotates. Debian and Ubuntu use their system CA update tooling; Alpine, Java and other applications can require different trust stores. A full project recipe must be qualified on a real guest before being presented as tested. Template image pulls use Docker Sandboxes registry configuration; Devsy's separate guest Docker credential forwarding governs private devcontainer pulls.
 
-## Diagnostics and recovery
+### Diagnostics and recovery
 
 Use `devsy provider list --result-format=json` to identify the installed alias and inspect its `config.binaries.DOCKER_SANDBOX_PROVIDER` entry for the native asset name. The installed executable is under Devsy's data directory at `contexts/<context>/providers/<alias>/binaries/docker_sandbox_provider/<asset-name>`. If you installed with `DEVSY_HOME` set, that is the data directory; otherwise use Devsy's OS-specific data directory, where its `config.yaml` lives. Do not use the asset URL as a filesystem path or assume the executable is globally on `PATH`. Run the resolved executable directly:
 
@@ -77,7 +79,35 @@ After uninstalling Devsy's machine registration or force deleting it, reinstall 
 
 Deletion still checks the qualified `sbx` profile, ownership ID, active sessions and verified absence. If those checks fail, retain the journal for recovery. Host-wide `sbx reset` and global prune are never recovery instructions for this provider.
 
-## Native qualification and releases
+## Development
+
+Run `mise run test`, `mise run lint` and `mise run build` for ordinary development. Native VM suites require authenticated, virtualization-capable runners. A build or client version response does not qualify a host.
+
+## Release
+
+Release Please opens a version and changelog pull request after main CI passes. It does not create a tag. After the release pull request is merged, the operator creates a signed provider tag on that exact merge commit. Because Release Please skips creating a GitHub release, remove its pending label and mark the release tagged so it can open later release pull requests:
+
+```sh
+gh pr edit <n> --remove-label "autorelease: pending" --add-label "autorelease: tagged"
+```
+
+Dispatch the release workflow from the signed tag with a published compatible Devsy core release and its verified commit SHA:
+
+```sh
+gh workflow run release.yml --ref vX.Y.Z -f version=vX.Y.Z -f core_ref=<core sha> -f core_tag=<core tag>
+```
+
+The workflow requires `GITHUB_REF` to equal `refs/tags/$VERSION`. Distribution builds and tests provider executables, generates the manifest and checksums, and verifies installation through an alternate alias. On the first dispatch, native VM jobs run, then the evidence job fails because `SBX_NATIVE_EVIDENCE` must cite a successful `release.yml` native VM job for the same candidate commit. Review the run, assemble the evidence JSON using the successful native VM job URLs, set `SBX_NATIVE_EVIDENCE` on the `native-sandbox-qualification` environment, then dispatch the workflow again with the same tag and core inputs. After native jobs and evidence validation pass, approve the protected `provider-release` environment. Publication occurs only after those gates pass.
+
+The workflows read these repository variables:
+
+- `SBX_DISTRIBUTION_CORE_REF` selects the pinned Devsy core commit for CI distribution checks.
+- `SBX_NATIVE_RUNNER_MACOS_ARM64`, `SBX_NATIVE_RUNNER_WINDOWS_AMD64`, `SBX_NATIVE_RUNNER_LINUX_AMD64`, and `SBX_NATIVE_RUNNER_LINUX_ARM64` provide JSON runner label arrays for qualified hosts.
+- `SBX_NATIVE_EXECUTABLE` identifies the checksum verified `sbx` executable on native runners.
+- `SBX_NATIVE_DENIED_URL` identifies a reachable URL denied by the configured sandbox policy.
+- `SBX_NATIVE_EVIDENCE` supplies reviewed evidence for the exact provider and core commits. It must reference successful native VM jobs from the release workflow run for that candidate.
+
+### Native qualification
 
 Each advertised host requires a virtualization-capable runner with the exact OS and architecture, a pinned `sbx` installation, an authenticated Docker Sandboxes account and network policy, the compatible Devsy core executable, and a reviewed compatibility profile backed by captured native CLI and daemon outputs. Native validation must establish identity and inventory states, mountless creation, detached persistence, byte transport, cooperative cancellation, root and Docker disk sizing, fixed guest socket and Docker features, VM ownership and crash recovery, network policy and secrets, installer checksum rejection, and real Devsy up, exec, SSH, IDE, forwarding, Compose, stop/start, rebuild and deletion. An unavailable runner or missing sign-in blocks that tuple. Do not claim native support on the strength of unit tests.
 

@@ -68,14 +68,30 @@ func TestNativeWorkspace(t *testing.T) {
 	if err := os.WriteFile(manifestPath, manifest, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	h := &nativeHarness{devsy: devsy, home: filepath.Join(root, "devsy-home"), alias: "sandbox-native", root: root, ctx: ctx}
+	h := &nativeHarness{
+		devsy: devsy,
+		home:  filepath.Join(root, "devsy-home"),
+		alias: "sandbox-native",
+		root:  root,
+		ctx:   ctx,
+	}
 	h.run(t, nil, "provider", "add", "--use=false", "--name", h.alias, manifestPath)
 	h.run(t, nil, "provider", "set", h.alias, "-o", "SBX_PATH="+sbx)
 	h.run(t, nil, "provider", "init", h.alias)
 	image := h.createWorkspace(t, "image")
 	t.Run("image hooks and source persistence", func(t *testing.T) {
 		assertGuest(t, h, image, "test -f /tmp/devsy-sandbox-post-create")
-		h.run(t, nil, "workspace", "exec", image, "--", "sh", "-c", "printf machine-data > /tmp/devsy-sandbox-persist")
+		h.run(
+			t,
+			nil,
+			"workspace",
+			"exec",
+			image,
+			"--",
+			"sh",
+			"-c",
+			"printf machine-data > /tmp/devsy-sandbox-persist",
+		)
 		h.run(t, nil, "workspace", "stop", image)
 		h.run(t, nil, "workspace", "up", "--ide", "none", image)
 		assertGuest(t, h, image, "test \"$(cat /tmp/devsy-sandbox-persist)\" = machine-data")
@@ -90,7 +106,12 @@ func TestNativeWorkspace(t *testing.T) {
 		id := h.createWorkspace(t, "compose")
 		assertGuest(t, h, id, "test \"$(cat /tmp/devsy-sandbox-compose)\" = compose-ready")
 		assertGuest(t, h, id, "test -d /var/lib/sandbox-data")
-		assertGuest(t, h, id, "timeout 20 bash -c 'until (echo > /dev/tcp/database/5432) >/dev/null 2>&1; do sleep 1; done'")
+		assertGuest(
+			t,
+			h,
+			id,
+			"timeout 20 bash -c 'until (echo > /dev/tcp/database/5432) >/dev/null 2>&1; do sleep 1; done'",
+		)
 	})
 	t.Run("bash zsh and fish shells", func(t *testing.T) {
 		id := h.createWorkspace(t, "shell")
@@ -105,16 +126,47 @@ func TestNativeWorkspace(t *testing.T) {
 		id := h.createWorkspace(t, "network")
 		created := newSandboxName(t, before, sandboxNames(t, h.ctx, sbx))
 		assertGuest(t, h, id, "test -s /tmp/devsy-sandbox-allowed-https")
-		assertGuest(t, h, id, "curl --fail --silent --show-error --max-time 30 https://registry.npmjs.org/ >/dev/null")
-		command := exec.CommandContext(h.ctx, h.devsy, "--no-status", "workspace", "exec", id, "--", "sh", "-c", "if curl --fail --silent --max-time 10 --output /dev/null -- \"$1\" >/dev/null 2>&1; then exit 1; fi", "sh", deniedURL)
+		assertGuest(
+			t,
+			h,
+			id,
+			"curl --fail --silent --show-error --max-time 30 https://registry.npmjs.org/ >/dev/null",
+		)
+		command := exec.CommandContext(
+			h.ctx,
+			h.devsy,
+			"--no-status",
+			"workspace",
+			"exec",
+			id,
+			"--",
+			"sh",
+			"-c",
+			"if curl --fail --silent --max-time 10 --output /dev/null -- \"$1\" >/dev/null 2>&1; then exit 1; fi",
+			"sh",
+			deniedURL,
+		)
 		command.Env = append(os.Environ(), "DEVSY_HOME="+h.home)
 		if output, err := command.CombinedOutput(); err != nil {
 			t.Fatalf("guest reached the denied destination: %v: %s", err, output)
 		}
-		if decision := policyDecision(t, h.ctx, sbx, created, deniedURL); decision.Allowed || decision.DenyKind == "" {
+		if decision := policyDecision(
+			t,
+			h.ctx,
+			sbx,
+			created,
+			deniedURL,
+		); decision.Allowed ||
+			decision.DenyKind == "" {
 			t.Fatalf("sbx policy does not deny %s for the sandbox: %+v", deniedURL, decision)
 		}
-		if decision := policyDecision(t, h.ctx, sbx, created, "https://registry.npmjs.org/"); !decision.Allowed {
+		if decision := policyDecision(
+			t,
+			h.ctx,
+			sbx,
+			created,
+			"https://registry.npmjs.org/",
+		); !decision.Allowed {
 			t.Fatalf("sbx policy does not allow the build destination: %+v", decision)
 		}
 	})
@@ -127,7 +179,8 @@ type networkDecision struct {
 
 func policyDecision(t *testing.T, ctx context.Context, sbx, sandbox, url string) networkDecision {
 	t.Helper()
-	output, err := exec.CommandContext(ctx, sbx, "policy", "check", "network", "--sandbox", sandbox, "--json", url).Output()
+	output, err := exec.CommandContext(ctx, sbx, "policy", "check", "network", "--sandbox", sandbox, "--json", url).
+		Output()
 	var exit *exec.ExitError
 	if err != nil && !errors.As(err, &exit) {
 		t.Fatalf("sbx policy check for %s failed: %v", url, err)
@@ -189,7 +242,12 @@ func (h *nativeHarness) createWorkspace(t *testing.T, fixture string) string {
 		command := exec.CommandContext(ctx, h.devsy, "--no-status", "workspace", "delete", id)
 		command.Env = append(os.Environ(), "DEVSY_HOME="+h.home)
 		if output, err := command.CombinedOutput(); err != nil {
-			t.Errorf("scoped workspace cleanup failed; retain provider state under %s: %v: %s", h.home, err, output)
+			t.Errorf(
+				"scoped workspace cleanup failed; retain provider state under %s: %v: %s",
+				h.home,
+				err,
+				output,
+			)
 		}
 	})
 	created = true

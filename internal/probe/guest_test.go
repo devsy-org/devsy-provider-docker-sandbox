@@ -46,13 +46,24 @@ func TestDiskCapacityMatch(t *testing.T) {
 		{"invalid Docker available", [2]int64{101, 202}, [2]int64{1000, 1}, [2]int64{2000, 2001}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			output := fmt.Sprintf("%d %d\n%d %d\n%d %d\n", tc.devices[0], tc.devices[1], tc.root[0], tc.root[1], tc.docker[0], tc.docker[1])
+			output := fmt.Sprintf(
+				"%d %d\n%d %d\n%d %d\n",
+				tc.devices[0],
+				tc.devices[1],
+				tc.root[0],
+				tc.root[1],
+				tc.docker[0],
+				tc.docker[1],
+			)
 			if got := matchDiskCapacity(requirement, []byte(output)); got != tc.want {
 				t.Errorf("matchDiskCapacity(%q) = %t, want %t", output, got, tc.want)
 			}
 		})
 	}
-	for _, output := range []string{"", "101 202\n1000 1\n", "101 202\n1000 1\n2000 1\nextra", "101 202\n1000 unknown\n2000 1\n"} {
+	for _, output := range []string{
+		"", "101 202\n1000 1\n", "101 202\n1000 1\n2000 1\nextra",
+		"101 202\n1000 unknown\n2000 1\n",
+	} {
 		if matchDiskCapacity(requirement, []byte(output)) {
 			t.Errorf("invalid disk report accepted: %q", output)
 		}
@@ -77,7 +88,10 @@ func TestMeasuredGuestDiskProbe(t *testing.T) {
 	if err := Match(check, []byte("101 202\n25769803777 1\n12573614080 1\n")); err == nil {
 		t.Fatal("oversized root filesystem accepted")
 	}
-	if err := Match(Checks(config.Spec{})[len(checks)-1], []byte("101 202\n25185042432 1\n12573614080 1\n")); err == nil {
+	if err := Match(
+		Checks(config.Spec{})[len(checks)-1],
+		[]byte("101 202\n25185042432 1\n12573614080 1\n"),
+	); err == nil {
 		t.Fatal("zero requested disk capacity accepted")
 	}
 }
