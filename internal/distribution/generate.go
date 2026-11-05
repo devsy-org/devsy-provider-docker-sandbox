@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"text/template"
 
 	"github.com/devsy-org/devsy-provider-docker-sandbox/internal/compat"
@@ -180,53 +181,61 @@ func validateStates(qualified profile) error {
 	return nil
 }
 
+var platforms = []binary{
+	{OS: "linux", Arch: "amd64"},
+	{OS: "linux", Arch: "arm64"},
+	{OS: "darwin", Arch: "arm64"},
+	{OS: "windows", Arch: "amd64"},
+}
+
+func (b binary) host() string { return b.OS + "/" + b.Arch }
+
 func collectBinaries(qualified profile, directory string) ([]binary, error) {
-	if len(qualified.QualifiedHosts) == 0 {
-		return nil, errors.New("compatibility profile contains no qualified native hosts")
+	if err := validateQualifiedHosts(qualified); err != nil {
+		return nil, err
 	}
-	if len(qualified.QualifiedSBXVersions) != 1 {
-		return nil, errors.New("disk sizing requires one measured sbx client version")
-	}
-	seen := make(map[string]bool, len(qualified.QualifiedHosts))
-	binaries := make([]binary, 0, len(qualified.QualifiedHosts))
-	for _, host := range qualified.QualifiedHosts {
-		item, err := collectBinary(qualified, directory, host, seen)
+	binaries := make([]binary, 0, len(platforms))
+	for _, platform := range platforms {
+		item, err := collectBinary(directory, platform)
 		if err != nil {
 			return nil, err
 		}
 		binaries = append(binaries, item)
 	}
-	if len(qualified.DiskSizingSchemas) != len(qualified.QualifiedHosts) {
-		return nil, errors.New("qualified hosts require exact measured disk sizing schemas")
-	}
 	return binaries, nil
 }
 
-func collectBinary(
-	qualified profile,
-	directory, host string,
-	seen map[string]bool,
-) (binary, error) {
-	platforms := map[string]binary{
-		"darwin/arm64":  {OS: "darwin", Arch: "arm64"},
-		"windows/amd64": {OS: "windows", Arch: "amd64"},
-		"linux/amd64":   {OS: "linux", Arch: "amd64"},
-		"linux/arm64":   {OS: "linux", Arch: "arm64"},
+func supportedHost(host string) bool {
+	return slices.ContainsFunc(platforms, func(b binary) bool { return b.host() == host })
+}
+
+func validateQualifiedHosts(qualified profile) error {
+	if len(qualified.QualifiedHosts) == 0 {
+		return errors.New("compatibility profile contains no qualified native hosts")
 	}
-	item, ok := platforms[host]
-	if !ok || seen[host] {
-		return binary{}, fmt.Errorf("unsupported or duplicate qualified host %q", host)
+	if len(qualified.QualifiedSBXVersions) != 1 {
+		return errors.New("disk sizing requires one measured sbx client version")
 	}
-	seen[host] = true
 	version := qualified.QualifiedSBXVersions[0]
-	expected := compat.MeasuredDiskSizingSchema(
-		host,
-		version,
-		qualified.QualifiedSBXRevisions[version],
-	)
-	if expected == "" || qualified.DiskSizingSchemas[host] != expected {
-		return binary{}, fmt.Errorf("unqualified disk sizing schema for host %q", host)
+	seen := make(map[string]bool, len(qualified.QualifiedHosts))
+	for _, host := range qualified.QualifiedHosts {
+		if seen[host] || !supportedHost(host) {
+			return fmt.Errorf("unsupported or duplicate qualified host %q", host)
+		}
+		seen[host] = true
+		expected := compat.MeasuredDiskSizingSchema(
+			host,
+			version,
+			qualified.QualifiedSBXRevisions[version],
+		)
+		if expected == "" || qualified.DiskSizingSchemas[host] != expected {
+			return fmt.Errorf("unqualified disk sizing schema for host %q", host)
+		}
 	}
+	return nil
+}
+
+func collectBinary(directory string, item binary) (binary, error) {
 	item.Name = "devsy-provider-docker-sandbox-" + item.OS + "-" + item.Arch
 	if item.OS == "windows" {
 		item.Name += ".exe"

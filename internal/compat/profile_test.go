@@ -5,12 +5,14 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
 const (
 	betaMinimum = "v1.27.0-beta.4"
 	unmeasured  = "unmeasured"
+	otherHost   = "plan9/mips"
 )
 
 func TestUnqualifiedProfileFailsClosed(t *testing.T) {
@@ -20,9 +22,6 @@ func TestUnqualifiedProfileFailsClosed(t *testing.T) {
 	}
 	if p.MinimumDevsyVersion != "" || len(p.QualifiedHosts) != 0 {
 		t.Skip("release profile qualified externally")
-	}
-	if e = p.Host(); e == nil {
-		t.Fatal("unqualified host admitted")
 	}
 	if e = p.Devsy(context.Background(), ""); e == nil {
 		t.Fatal("unqualified Devsy admitted")
@@ -122,46 +121,72 @@ func TestDevsyVersionAdmission(t *testing.T) {
 	}
 }
 
-func TestUnmeasuredDiskCapacityFailsClosed(t *testing.T) {
-	err := (Profile{}).RequireDiskSizingQualification()
+func TestUnqualifiedHostIsAdmittedWithWarning(t *testing.T) {
+	p := Profile{QualifiedHosts: []string{otherHost}}
+	if p.HostQualified() {
+		t.Fatal("host reported as natively qualified")
+	}
+	if err := p.Host(); err != nil {
+		t.Fatalf("unqualified host refused: %v", err)
+	}
+	if err := p.RequireDiskSizingQualification(); err != nil {
+		t.Fatalf("unqualified host refused for disk sizing: %v", err)
+	}
+	warning := p.HostWarning()
+	for _, want := range []string{
+		runtime.GOOS + "/" + runtime.GOARCH,
+		"built and unit-tested only",
+		"no native qualification evidence",
+		otherHost,
+	} {
+		if !strings.Contains(warning, want) {
+			t.Fatalf("warning %q lacks %q", warning, want)
+		}
+	}
+	if warning = (Profile{}).HostWarning(); !strings.Contains(warning, "none") {
+		t.Fatalf("warning for an empty profile = %q", warning)
+	}
+}
+
+func TestQualifiedHostDoesNotWarn(t *testing.T) {
+	p := Profile{QualifiedHosts: []string{runtime.GOOS + "/" + runtime.GOARCH, otherHost}}
+	if !p.HostQualified() {
+		t.Fatal("qualified host not recognized")
+	}
+	if warning := p.HostWarning(); warning != "" {
+		t.Fatalf("qualified host warned: %q", warning)
+	}
+}
+
+func TestQualifiedHostDiskCapacityFailsClosed(t *testing.T) {
+	p := Profile{QualifiedHosts: []string{runtime.GOOS + "/" + runtime.GOARCH}}
+	err := p.RequireDiskSizingQualification()
 	tagged, ok := err.(*Error)
 	if !ok || tagged.Code != "E_GUEST_CAPABILITY" {
 		t.Fatalf("unmeasured disk overhead accepted: %v", err)
 	}
 }
 
-func TestMeasuredSchemaGates(t *testing.T) {
-	p := Profile{
+func measuredProfile() Profile {
+	return Profile{
 		ShellSettingSchema:    ShellSettingSchemaV0501,
 		OperationResultSchema: OperationResultSchemaV0501,
 		QualifiedSBXVersions:  []string{"v0.50.1"},
 		QualifiedSBXRevisions: map[string]string{
 			"v0.50.1": "ddb0268d7124b9cf98955d0b08ffd71a0dfcebe4",
 		},
+		QualifiedHosts:    []string{"darwin/arm64"},
 		DiskSizingSchemas: map[string]string{"darwin/arm64": DiskSizingSchemaDarwinARM64V0501},
 	}
+}
+
+func TestMeasuredSchemaGates(t *testing.T) {
+	p := measuredProfile()
 	if err := p.RequireShellSchema(); err != nil {
 		t.Fatal(err)
 	}
 	if err := p.RequireOperationResultSchema(); err != nil {
 		t.Fatal(err)
-	}
-	err := p.RequireDiskSizingQualification()
-	if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
-		if err != nil {
-			t.Fatal(err)
-		}
-	} else if err == nil {
-		t.Fatal("unmeasured host accepted")
-	}
-	checkUnmeasuredSchemas(t, p)
-}
-
-func checkUnmeasuredSchemas(t *testing.T, p Profile) {
-	t.Helper()
-	p.QualifiedSBXRevisions["v0.50.1"] = unmeasured
-	if err := p.RequireDiskSizingQualification(); err == nil {
-		t.Fatal("unmeasured client revision accepted")
 	}
 	p.ShellSettingSchema = unmeasured
 	if err := p.RequireShellSchema(); err == nil {
@@ -170,5 +195,19 @@ func checkUnmeasuredSchemas(t *testing.T, p Profile) {
 	p.OperationResultSchema = unmeasured
 	if err := p.RequireOperationResultSchema(); err == nil {
 		t.Fatal("unmeasured result schema accepted")
+	}
+}
+
+func TestMeasuredDiskSizingOnQualifiedHost(t *testing.T) {
+	if runtime.GOOS != "darwin" || runtime.GOARCH != "arm64" {
+		t.Skip("measured disk sizing is native to darwin/arm64")
+	}
+	p := measuredProfile()
+	if err := p.RequireDiskSizingQualification(); err != nil {
+		t.Fatal(err)
+	}
+	p.QualifiedSBXRevisions["v0.50.1"] = unmeasured
+	if err := p.RequireDiskSizingQualification(); err == nil {
+		t.Fatal("unmeasured client revision accepted")
 	}
 }

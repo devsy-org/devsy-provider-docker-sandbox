@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -72,23 +73,33 @@ func Load() (Profile, error) {
 	return p, nil
 }
 
+func currentHost() string { return runtime.GOOS + "/" + runtime.GOARCH }
+
+func (p Profile) HostQualified() bool {
+	return slices.Contains(p.QualifiedHosts, currentHost())
+}
+
 func (p Profile) Host() error {
-	tuple := runtime.GOOS + "/" + runtime.GOARCH
-	ok := false
-	for _, v := range p.QualifiedHosts {
-		if v == tuple {
-			ok = true
-		}
-	}
-	if !ok {
-		return Fail(
-			"E_HOST_UNSUPPORTED",
-			"%s has no native-qualified profile; qualified hosts: %v",
-			tuple,
-			p.QualifiedHosts,
-		)
+	if !p.HostQualified() {
+		return nil
 	}
 	return hostVersion()
+}
+
+func (p Profile) HostWarning() string {
+	if p.HostQualified() {
+		return ""
+	}
+	qualified := "none"
+	if len(p.QualifiedHosts) != 0 {
+		qualified = strings.Join(p.QualifiedHosts, ", ")
+	}
+	return fmt.Sprintf(
+		"host %s is built and unit-tested only and has no native qualification evidence; "+
+			"natively qualified hosts: %s",
+		currentHost(),
+		qualified,
+	)
 }
 
 func (p Profile) SBX(version, revision string) error {
@@ -332,7 +343,10 @@ func MeasuredDiskSizingSchema(host, version, revision string) string {
 }
 
 func (p Profile) RequireDiskSizingQualification() error {
-	host := runtime.GOOS + "/" + runtime.GOARCH
+	if !p.HostQualified() {
+		return nil
+	}
+	host := currentHost()
 	if len(p.QualifiedSBXVersions) != 1 {
 		return Fail(
 			"E_GUEST_CAPABILITY",

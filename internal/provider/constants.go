@@ -32,4 +32,5 @@ const (
 	testUnitRunning        = "unit-running"
 	kindCommand            = "command"
 	codeOperationUncertain = "E_OPERATION_UNCERTAIN"
+	unqualifiedHost        = "plan9/mips"
 )

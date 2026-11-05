@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"runtime"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -61,6 +62,43 @@ func TestDoctorReadsLocalStateWithoutBackend(t *testing.T) {
 	}
 	if parsed.Record == nil || parsed.Record.SandboxName != r.SandboxName {
 		t.Fatal("doctor omitted independent recovery record")
+	}
+}
+
+func TestDoctorWarnsOnUnqualifiedHostAndNotOnQualifiedHost(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		hosts   []string
+		warning bool
+	}{
+		{"unqualified", []string{unqualifiedHost}, true},
+		{"qualified", []string{runtime.GOOS + "/" + runtime.GOARCH}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := localProvider(t)
+			p.Profile = compat.Profile{QualifiedHosts: tc.hosts}
+			result, e := p.Doctor(context.Background())
+			requireNoError(t, e)
+			var parsed Diagnosis
+			requireNoError(t, json.Unmarshal(result, &parsed))
+			if (len(parsed.Warnings) == 1) != tc.warning || len(parsed.Warnings) > 1 {
+				t.Fatalf("warnings = %v, want warning %t", parsed.Warnings, tc.warning)
+			}
+			if tc.warning && !strings.Contains(parsed.Warnings[0], "no native qualification") {
+				t.Fatalf("warning = %q", parsed.Warnings[0])
+			}
+		})
+	}
+}
+
+func TestUnqualifiedHostPassesAdmissionChecks(t *testing.T) {
+	p := localProvider(t)
+	p.Profile = compat.Profile{QualifiedHosts: []string{unqualifiedHost}}
+	if e := p.Profile.Host(); e != nil {
+		t.Fatal(e)
+	}
+	if e := p.Profile.RequireDiskSizingQualification(); e != nil {
+		t.Fatal(e)
 	}
 }
 
@@ -494,7 +532,6 @@ func TestObserveAllowingAttachedAcceptsFreshlyCreatedRunningSandbox(t *testing.T
 func simulatedProfile(t *testing.T) compat.Profile {
 	t.Helper()
 	p := compat.Profile{
-		QualifiedHosts:          []string{runtime.GOOS + "/" + runtime.GOARCH},
 		QualifiedSBXVersions:    []string{testUnitClient},
 		QualifiedSBXRevisions:   map[string]string{testUnitClient: "unit-revision"},
 		QualifiedDaemonVersions: map[string][]string{testUnitClient: {"unit-daemon"}},
@@ -502,7 +539,7 @@ func simulatedProfile(t *testing.T) compat.Profile {
 		InventoryStates:         map[string]string{testUnitRunning: stateRunning},
 	}
 	if err := p.Host(); err != nil {
-		t.Skipf("unsupported test host: %v", err)
+		t.Fatal(err)
 	}
 	return p
 }
@@ -655,8 +692,9 @@ func testUncertainCreateCase(t *testing.T, tc uncertainCreateCase) {
 	}
 }
 
-func TestReadinessBlocksUnmeasuredSizingBeforeBackendCall(t *testing.T) {
+func TestReadinessBlocksUnmeasuredSizingOnQualifiedHostBeforeBackendCall(t *testing.T) {
 	p := localProvider(t)
+	p.Profile = compat.Profile{QualifiedHosts: []string{runtime.GOOS + "/" + runtime.GOARCH}}
 	r, err := state.New(
 		p.Identity,
 		config.Spec{CPUs: 1, RootDiskBytes: 40 << 30, DockerDiskBytes: 40 << 30},

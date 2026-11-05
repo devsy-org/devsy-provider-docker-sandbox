@@ -19,10 +19,23 @@ type Diagnosis struct {
 	Attempts      []state.Attempt `json:"attempts,omitempty"`
 	Backend       *sbx.Sandbox    `json:"backend,omitempty"`
 	BackendError  string          `json:"backend_error,omitempty"`
+	Warnings      []string        `json:"warnings,omitempty"`
+}
+
+func hostWarnings(profile compat.Profile) []string {
+	if warning := profile.HostWarning(); warning != "" {
+		return []string{warning}
+	}
+	return nil
 }
 
 func (p Provider) Doctor(ctx context.Context) ([]byte, error) {
-	out := Diagnosis{SchemaVersion: 1, MachineKey: p.Store.Key, Compatibility: p.Profile}
+	out := Diagnosis{
+		SchemaVersion: 1,
+		MachineKey:    p.Store.Key,
+		Compatibility: p.Profile,
+		Warnings:      hostWarnings(p.Profile),
+	}
 	r, e := p.doctorRecord(&out)
 	if e != nil {
 		return nil, e
@@ -82,5 +95,6 @@ func List(_ context.Context, p compat.Profile) ([]byte, error) {
 		SchemaVersion int            `json:"schema_version"`
 		Compatibility compat.Profile `json:"compatibility"`
 		Records       []state.Record `json:"records"`
-	}{1, p, records}, "", "  ")
+		Warnings      []string       `json:"warnings,omitempty"`
+	}{1, p, records, hostWarnings(p)}, "", "  ")
 }

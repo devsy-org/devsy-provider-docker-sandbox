@@ -123,7 +123,7 @@ jobs:
       - name: Require reviewed native evidence for every qualified tuple
         shell: bash
         run: |
-          test -n "$NATIVE_EVIDENCE" || { echo 'Reviewed native qualification evidence is absent; publication is blocked.' >&2; exit 1; }
+          test -n "$NATIVE_EVIDENCE" || { echo 'Reviewed native qualification evidence for the qualified hosts is absent; publication is blocked.' >&2; exit 1; }
           jq -e --arg candidate "$CANDIDATE" --arg core "$CORE_REF" --arg version "$VERSION" --slurpfile profile internal/compat/profile.json '
             .candidate_commit == $candidate and .core_commit == $core and .provider_version == $version and
             ([.hosts[].host] | sort) == ($profile[0].qualified_hosts | sort) and
