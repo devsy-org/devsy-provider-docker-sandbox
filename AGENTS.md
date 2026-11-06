@@ -32,6 +32,8 @@ Keep literal process arguments, byte-preserving streams, guest exits, cancellati
 
 ## Validation and pull requests
 
+Contributors sign the CLA by commenting when asked; bots are allowlisted.
+
 The release generator uses actual executable SHA-256 hashes and publishes all four supported hosts. `qualified_hosts` is an evidence label for hosts with native VM evidence and does not gate publication of the other hosts. Publication requires a signed tag, compatible published Devsy core release, successful native VM jobs and reviewed `SBX_NATIVE_EVIDENCE` for every host in `qualified_hosts`, and approval through the protected `provider-release` environment. Release notes and the README must list which hosts are natively qualified and which are built and unit tested only. Do not invent observed output fixtures. Do not commit credentials or local journal files.
 
 Use signed Conventional Commits. Pull requests require applicable CI and completed CodeRabbit and Greptile reviews; resolve significant valid findings before merge. A skipped or rate-limited review remains pending. Merge only with human authorization. Squash with a single-line Conventional Commit subject and an empty body. Apply this rule to release pull requests as well. Release Please does not create tags; an operator creates a signed tag on the merged release commit and dispatches the qualified release workflow. Remove the `autorelease: pending` label and add `autorelease: tagged` after tagging so Release Please can continue opening release pull requests.
