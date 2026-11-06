@@ -27,4 +27,3 @@ Natively qualified: darwin/arm64. Built and unit tested: linux/amd64, linux/arm6
 Customer documentation: [Docker Sandboxes provider](https://devsy.sh/docs/managing-providers/docker-sandbox).
 
 Contributors: [AGENTS.md](AGENTS.md).
-
