@@ -17,7 +17,7 @@ devsy provider add docker-sandbox
 Until a stable release exists:
 
 ```sh
-devsy provider add docker-sandbox --manifest https://github.com/devsy-org/devsy-provider-docker-sandbox/releases/latest/download/provider.yaml
+devsy provider add --use=false --name docker-sandbox https://github.com/devsy-org/devsy-provider-docker-sandbox/releases/download/v0.1.1/provider.yaml
 ```
 
 ## Hosts
