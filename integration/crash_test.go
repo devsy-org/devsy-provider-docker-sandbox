@@ -42,10 +42,15 @@ func TestNativeProviderCrash(t *testing.T) {
 	if sandboxNames(t, h.ctx, h.backend)[r.SandboxName] {
 		t.Fatal("delete left an orphan sandbox")
 	}
-	if output := h.run("status"); strings.TrimSpace(string(output)) != "NotFound" {
-		t.Fatalf("deleted status: %s", output)
+	output, err := h.command("status").CombinedOutput()
+	if err == nil || !bytes.Contains(output, []byte("E_MACHINE_MISSING")) {
+		t.Fatalf("deleted owned machine did not fail closed: %v: %s", err, output)
 	}
-	t.Log("delete verified absent in real sbx inventory; status NotFound")
+	deleted := h.record()
+	if deleted.Phase != "deleted" || deleted.Operation != nil || deleted.SandboxID != r.SandboxID {
+		t.Fatal("delete did not retain the settled owned identity")
+	}
+	t.Log("delete verified absent in real sbx inventory; deleted journal retains owned ID")
 }
 
 func (h *crashHarness) crashStart() state.Attempt {
