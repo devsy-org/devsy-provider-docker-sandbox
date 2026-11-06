@@ -28,6 +28,3 @@ Customer documentation: [Docker Sandboxes provider](https://devsy.sh/docs/managi
 
 Contributors: [AGENTS.md](AGENTS.md).
 
-## License
-
-See [LICENSE](LICENSE).
