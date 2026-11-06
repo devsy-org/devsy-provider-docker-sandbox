@@ -9,8 +9,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -55,44 +57,71 @@ func TestNativeProviderCrash(t *testing.T) {
 
 func (h *crashHarness) crashStart() state.Attempt {
 	h.t.Helper()
-	sessions, err := h.store.Acquire(h.ctx, "sessions", true)
-	if err != nil {
-		h.t.Fatal(err)
-	}
-	defer func() {
-		if err := sessions.Close(); err != nil {
-			h.t.Error(err)
-		}
-	}()
+	completed := h.completedAttempt()
 	first := h.command("start")
 	var diagnostics bytes.Buffer
 	first.Stderr = &diagnostics
 	if err := first.Start(); err != nil {
 		h.t.Fatal(err)
 	}
-	defer func() { _ = first.Process.Kill(); _ = first.Wait() }()
-	h.wait(func() bool {
-		output, err := h.command("status").Output()
-		return err == nil && strings.TrimSpace(string(output)) == "Busy"
-	})
-	h.assertConcurrentBlocked()
-	if err := sessions.Close(); err != nil {
-		h.t.Fatal(err)
-	}
-	sessions = nil
+	defer func() {
+		if first.ProcessState == nil {
+			_ = first.Process.Kill()
+			_ = first.Wait()
+		}
+	}()
 	attempt := h.waitStartedRun()
+	second := h.startContender(completed)
+	defer second.cleanup()
+	h.waitContender(second)
+	h.assertCrashWindow(attempt)
+	before := h.record()
 	if err := first.Process.Kill(); err != nil {
 		h.t.Fatal(err)
 	}
-	if err := first.Wait(); err == nil {
-		h.t.Fatal("provider completed before hard termination")
-	} else {
-		if runtime.GOOS != "windows" && err.Error() != "signal: killed" {
-			h.t.Fatalf("provider was not killed by SIGKILL: %v: %s", err, diagnostics.String())
-		}
-		h.t.Logf("hard-killed provider during start: %v", err)
+	h.assertKilled(first, &diagnostics)
+	second.assertCompleted(h.t)
+	after := h.record()
+	if !reflect.DeepEqual(before, after) {
+		h.t.Fatal("contending recovery changed interrupted journal")
 	}
+	observed, err := h.store.ReadAttempt(attempt.AttemptID)
+	if err != nil || !reflect.DeepEqual(attempt, observed) {
+		h.t.Fatal("contending recovery changed interrupted child attempt")
+	}
+	h.t.Log("provider B acquired lock after SIGKILL; journal unchanged")
 	return attempt
+}
+
+func (h *crashHarness) assertKilled(first *exec.Cmd, diagnostics *bytes.Buffer) {
+	h.t.Helper()
+	err := first.Wait()
+	if err == nil {
+		h.t.Fatal("provider completed before hard termination")
+	}
+	if runtime.GOOS != "windows" && err.Error() != "signal: killed" {
+		h.t.Fatalf("provider was not killed by SIGKILL: %v: %s", err, diagnostics.String())
+	}
+	h.t.Logf("hard-killed provider during start: %v", err)
+}
+
+func (h *crashHarness) assertCrashWindow(attempt state.Attempt) {
+	h.t.Helper()
+	lock, err := h.store.TryAcquire("mutation", false)
+	if err == nil {
+		if err := lock.Close(); err != nil {
+			h.t.Error(err)
+		}
+		h.t.Fatal("provider A no longer holds mutation lock")
+	}
+	if !errors.Is(err, context.Canceled) {
+		h.t.Fatal(err)
+	}
+	observed, err := h.store.ReadAttempt(attempt.AttemptID)
+	if err != nil || !reflect.DeepEqual(attempt, observed) {
+		h.t.Fatal("sbx run ended before crash window")
+	}
+	h.t.Log("provider B observed waiting at mutation lock held by provider A")
 }
 
 func (h *crashHarness) waitStartedRun() state.Attempt {
@@ -273,50 +302,105 @@ func (h *crashHarness) wait(condition func() bool) {
 	}
 }
 
-func (h *crashHarness) assertConcurrentBlocked() {
+type crashContender struct {
+	command  *exec.Cmd
+	done     chan struct{}
+	err      error
+	observer *lockWaitObserver
+}
+
+type lockWaitObserver struct {
+	mu       sync.Mutex
+	tail     string
+	waiting  chan struct{}
+	observed bool
+}
+
+func (o *lockWaitObserver) Write(data []byte) (int, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.tail += string(data)
+	if !o.observed && strings.Contains(o.tail, "G1: status=4(select)") {
+		o.observed = true
+		close(o.waiting)
+	}
+	if len(o.tail) > 65536 {
+		o.tail = o.tail[len(o.tail)-65536:]
+	}
+	return len(data), nil
+}
+
+func (o *lockWaitObserver) output() string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.tail
+}
+
+func (h *crashHarness) completedAttempt() state.Attempt {
 	h.t.Helper()
-	directory := filepath.Join(h.t.TempDir(), "invocation")
-	if err := os.Mkdir(directory, 0o700); err != nil {
-		h.t.Fatal(err)
-	}
-	marker := filepath.Join(directory, "cancel")
 	attempts, err := h.store.Attempts()
-	if err != nil || len(attempts) == 0 {
-		h.t.Fatalf("read completed attempts: %v", err)
-	}
-	second := h.command("recover", "--machine-key", h.store.Key, "--attempt",
-		attempts[0].AttemptID, "--acknowledge-client-terminated")
-	second.Env = append(second.Env, "DEVSY_PROVIDER_CANCEL_FILE="+marker)
-	var output bytes.Buffer
-	second.Stderr = &output
-	if err := second.Start(); err != nil {
+	if err != nil {
 		h.t.Fatal(err)
 	}
-	done := make(chan error, 1)
-	go func() { done <- second.Wait() }()
-	select {
-	case err := <-done:
-		h.t.Fatalf("concurrent mutation escaped lock: %v: %s", err, output.String())
-	case <-time.After(500 * time.Millisecond):
-	}
-	if err := os.WriteFile(marker, nil, 0o600); err != nil {
-		h.t.Fatal(err)
-	}
-	select {
-	case err := <-done:
-		var exit *exec.ExitError
-		if !errors.As(err, &exit) || exit.ExitCode() != 1 ||
-			!strings.Contains(output.String(), "E_STORAGE: context canceled") {
-			h.t.Fatalf("blocked mutation cancellation: %v: %s", err, output.String())
+	for _, a := range attempts {
+		if a.Phase == "client_reaped" {
+			return a
 		}
-	case <-time.After(10 * time.Second):
-		_ = second.Process.Kill()
-		<-done
-		h.t.Fatal("concurrent mutation did not acknowledge host cancellation")
 	}
-	h.t.Log(
-		"second provider mutation blocked by first provider lock and cancelled at mutation lock",
-	)
+	h.t.Fatal("no completed child attempt for contending recovery")
+	return state.Attempt{}
+}
+
+func (h *crashHarness) startContender(completed state.Attempt) *crashContender {
+	h.t.Helper()
+	command := h.command("recover", "--machine-key", h.store.Key, "--attempt",
+		completed.AttemptID, "--acknowledge-client-terminated")
+	command.Env = append(command.Env, "GODEBUG=schedtrace=10,scheddetail=1", "GOMAXPROCS=2")
+	observer := &lockWaitObserver{waiting: make(chan struct{})}
+	contender := &crashContender{command: command, done: make(chan struct{}), observer: observer}
+	command.Stderr = observer
+	if err := command.Start(); err != nil {
+		h.t.Fatal(err)
+	}
+	go func() { contender.err = command.Wait(); close(contender.done) }()
+	return contender
+}
+
+func (h *crashHarness) waitContender(c *crashContender) {
+	h.t.Helper()
+	select {
+	case <-c.done:
+		h.t.Fatalf("provider B escaped mutation lock: %v: %s", c.err, c.observer.output())
+	case <-c.observer.waiting:
+	case <-time.After(30 * time.Second):
+		h.t.Fatalf("provider B did not reach lock wait: %s", c.observer.output())
+	}
+	select {
+	case <-c.done:
+		h.t.Fatalf("provider B stopped waiting before crash: %v", c.err)
+	default:
+	}
+}
+
+func (c *crashContender) assertCompleted(t *testing.T) {
+	t.Helper()
+	select {
+	case <-c.done:
+		if c.err != nil {
+			t.Fatalf("provider B failed after lock release: %v: %s", c.err, c.observer.output())
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("provider B did not acquire mutation lock after provider A died")
+	}
+}
+
+func (c *crashContender) cleanup() {
+	select {
+	case <-c.done:
+	default:
+		_ = c.command.Process.Kill()
+		<-c.done
+	}
 }
 
 func (h *crashHarness) terminateAttempt(a state.Attempt) {
