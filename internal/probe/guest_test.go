@@ -2,6 +2,7 @@ package probe
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/devsy-org/devsy-provider-docker-sandbox/internal/config"
@@ -55,7 +56,7 @@ func TestDiskCapacityMatch(t *testing.T) {
 				tc.docker[0],
 				tc.docker[1],
 			)
-			if got := matchDiskCapacity(requirement, []byte(output)); got != tc.want {
+			if got := matchDiskCapacity(requirement, []byte(output)) == nil; got != tc.want {
 				t.Errorf("matchDiskCapacity(%q) = %t, want %t", output, got, tc.want)
 			}
 		})
@@ -64,12 +65,12 @@ func TestDiskCapacityMatch(t *testing.T) {
 		"", "101 202\n1000 1\n", "101 202\n1000 1\n2000 1\nextra",
 		"101 202\n1000 unknown\n2000 1\n",
 	} {
-		if matchDiskCapacity(requirement, []byte(output)) {
+		if matchDiskCapacity(requirement, []byte(output)) == nil {
 			t.Errorf("invalid disk report accepted: %q", output)
 		}
 	}
 	for _, invalid := range []diskRequirement{{rootBytes: 0, dockerBytes: 2000}, {rootBytes: 1000, dockerBytes: 0}} {
-		if matchDiskCapacity(invalid, []byte("101 202\n1000 1\n2000 1\n")) {
+		if matchDiskCapacity(invalid, []byte("101 202\n1000 1\n2000 1\n")) == nil {
 			t.Errorf("invalid disk requirement accepted: %+v", invalid)
 		}
 	}
@@ -129,6 +130,76 @@ func TestQualifiedDockerDiskMeasurementsV0501Darwin(t *testing.T) {
 				err == nil,
 				tt.accepted,
 			)
+		}
+	}
+}
+
+func TestCapacityShortfallErrorNamesDiskAndSuggestsLargerSize(t *testing.T) {
+	cases := []struct {
+		name         string
+		rootMiB      int64
+		dockerMiB    int64
+		root, docker int64
+		want         []string
+	}{
+		{
+			"docker disk 6144MiB measured on v0.50.1 darwin/arm64",
+			8192,
+			6144,
+			8350298112,
+			6249086976,
+			[]string{
+				"Docker disk (SBX_DOCKER_DISK)",
+				"requested 6442450944 bytes (6.00 GiB)",
+				"guest reports 6249086976 bytes (5.82 GiB)",
+				"3.00 percent short",
+				"such as 8g may pass",
+			},
+		},
+		{
+			"root disk", 8192, 8192, 8000000000, 8350298112,
+			[]string{
+				"root disk (SBX_ROOT_DISK)", "requested 8589934592 bytes (8.00 GiB)",
+				"guest reports 8000000000 bytes", "6.87 percent short", "such as 9g may pass",
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			spec := config.Spec{
+				RootDiskBytes:   tc.rootMiB << 20,
+				DockerDiskBytes: tc.dockerMiB << 20,
+			}
+			checks := Checks(spec)
+			data := fmt.Appendf(nil, "29 65072\n%d 1\n%d 1\n", tc.root, tc.docker)
+			err := Match(checks[len(checks)-1], data)
+			if err == nil {
+				t.Fatal("undersized disk accepted")
+			}
+			for _, fragment := range tc.want {
+				if !strings.Contains(err.Error(), fragment) {
+					t.Errorf("error %q lacks %q", err, fragment)
+				}
+			}
+			if strings.Contains(err.Error(), "will pass") ||
+				strings.Contains(err.Error(), "guarantee") {
+				t.Errorf("error promises success: %q", err)
+			}
+		})
+	}
+}
+
+func TestCapacityErrorStaysGenericForNonShortfalls(t *testing.T) {
+	spec := config.Spec{RootDiskBytes: 8 << 30, DockerDiskBytes: 8 << 30}
+	checks := Checks(spec)
+	for _, data := range []string{
+		"29 65072\n8589934593 1\n8589934592 1\n",
+		"29 29\n8589934592 1\n8589934592 1\n",
+		"29 65072\n8589934592 9589934592\n8589934592 1\n",
+	} {
+		err := Match(checks[len(checks)-1], []byte(data))
+		if err == nil || strings.Contains(err.Error(), "percent short") {
+			t.Errorf("%q: got %v, want generic failure", data, err)
 		}
 	}
 }

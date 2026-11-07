@@ -191,3 +191,27 @@ func TestLoadExistingSkipsMinimumsButValidatesSyntax(t *testing.T) {
 		})
 	}
 }
+
+func TestInvalidSizeErrorStatesAcceptedSyntax(t *testing.T) {
+	for _, value := range []string{"4G", "4096", "4GB", "g", "0g", "-1g", "1.5g", "8 g"} {
+		t.Run(value, func(t *testing.T) {
+			opts := map[string]string{testPath: os.Args[0], testDockerDisk: value}
+			for name, load := range map[string]func(func(string) string) (Config, error){
+				"Load": Load, "LoadExisting": LoadExisting,
+			} {
+				_, err := load(func(k string) string { return opts[k] })
+				if err == nil {
+					t.Fatalf("%s accepted %q", name, value)
+				}
+				for _, fragment := range []string{
+					"E_CONFIG_DRIFT", "SBX_DOCKER_DISK", "invalid size", "lowercase m or g suffix",
+					"8g or 7680m",
+				} {
+					if !strings.Contains(err.Error(), fragment) {
+						t.Errorf("%s %q: error %q lacks %q", name, value, err, fragment)
+					}
+				}
+			}
+		})
+	}
+}
