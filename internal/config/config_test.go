@@ -13,17 +13,18 @@ const (
 	testPath       = "SBX_PATH"
 	testDockerDisk = "SBX_DOCKER_DISK"
 	testRootDisk   = "SBX_ROOT_DISK"
+	testBelowMem   = "511m"
 )
 
 func TestLoadRejectsInvalidResources(t *testing.T) {
 	cases := []struct{ key, value string }{
 		{testCPUs, "0"},
 		{testCPUs, "999999"},
-		{testMemory, "511m"},
+		{testMemory, testBelowMem},
 		{testMemory, "4G"},
 		{testMemory, "9223372036854775807g"},
 		{testRootDisk, "7g"},
-		{testDockerDisk, "511m"},
+		{testDockerDisk, testBelowMem},
 		{testDockerDisk, "6g"},
 		{testDockerDisk, "7167m"},
 		{testPath, "relative/sbx"},
@@ -152,5 +153,41 @@ func TestRootDiskMinimumMessage(t *testing.T) {
 	if err == nil ||
 		!strings.Contains(err.Error(), "SBX_ROOT_DISK: size \"7g\" is below the minimum of 8g") {
 		t.Fatalf("unexpected error %v", err)
+	}
+}
+
+func TestLoadExistingSkipsMinimumsButValidatesSyntax(t *testing.T) {
+	cases := []struct {
+		key, value string
+		want       int64
+		wantErr    bool
+	}{
+		{testDockerDisk, "6656m", 6656 << 20, false},
+		{testDockerDisk, "512m", 512 << 20, false},
+		{testRootDisk, "7g", 7 << 30, false},
+		{testDockerDisk, "6656M", 0, true},
+		{testDockerDisk, "0g", 0, true},
+		{testRootDisk, "7", 0, true},
+		{testMemory, testBelowMem, 511 << 20, false},
+	}
+	for _, tt := range cases {
+		t.Run(tt.key+tt.value, func(t *testing.T) {
+			opts := map[string]string{testPath: os.Args[0], tt.key: tt.value}
+			cfg, err := LoadExisting(func(k string) string { return opts[k] })
+			if tt.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "E_CONFIG_DRIFT") {
+					t.Fatalf("got %v, want E_CONFIG_DRIFT", err)
+				}
+				return
+			}
+			got := map[string]int64{
+				testDockerDisk: cfg.Spec.DockerDiskBytes,
+				testRootDisk:   cfg.Spec.RootDiskBytes,
+				testMemory:     cfg.Spec.MemoryBytes,
+			}[tt.key]
+			if err != nil || got != tt.want {
+				t.Fatalf("got %d, %v, want %d", got, err, tt.want)
+			}
+		})
 	}
 }
