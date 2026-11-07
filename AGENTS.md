@@ -24,6 +24,8 @@ An `sbx` client version, client revision or daemon version outside the qualified
 
 A sandbox state string that the profile does not list is handled by verb. Stop, delete and recover warn once, still require the recorded immutable ID and then proceed. Stop and delete send the `sbx` command and verify the outcome by reading the inventory again. Delete requires the sandbox to be absent. Stop accepts only a listed stopped state. An unlisted state keeps waiting and marks the operation uncertain at the timeout. Status, create and start stay fail-closed on an unrecognized state, because Devsy needs a known status token and a start must not build on a state the provider cannot classify. The `command` verb never prints a version or state warning, so the guest stream stays clean. Devsy surfaces provider standard error from create and start at info level. A create followed by start prints the unqualified host or unknown version warning once per verb. There is no deduplication across processes by design.
 
+The configuration minimums come from measured guest capacity on the qualified tuple, not from `sbx` limits. The guest filesystem is 2.3 to 5 percent smaller than the request, so `SBX_DOCKER_DISK` below 7g (measured: 6g fails at a 3.001 percent shortfall, 6.5g passes by a thin margin) and `SBX_ROOT_DISK` below 8g would fail the 3 percent capacity probe. Both are rejected at load with `E_CONFIG_DRIFT` naming the minimum. Raise a minimum only with new measurements, and never loosen the bound.
+
 ## Code quality and Go behavior
 
 Report a required daemon restart with an actionable error and never restart it automatically.

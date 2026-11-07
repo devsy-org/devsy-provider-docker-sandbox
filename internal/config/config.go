@@ -72,9 +72,16 @@ func size(s string, minimum int64) (int64, error) {
 	}
 	bytes := n * multiplier
 	if bytes < minimum {
-		return 0, fmt.Errorf("size %q below minimum", s)
+		return 0, fmt.Errorf("size %q is below the minimum of %s", s, formatSize(minimum))
 	}
 	return bytes, nil
+}
+
+func formatSize(bytes int64) string {
+	if bytes%(1<<30) == 0 {
+		return strconv.FormatInt(bytes>>30, 10) + "g"
+	}
+	return strconv.FormatInt(bytes>>20, 10) + "m"
 }
 
 func invalidExecutablePath(path string) bool {
@@ -147,7 +154,7 @@ func Load(getenv func(string) string) (Config, error) {
 	}{
 		{"SBX_MEMORY", 512 << 20, &c.Spec.MemoryBytes, "4g"},
 		{"SBX_ROOT_DISK", 8 << 30, &c.Spec.RootDiskBytes, "40g"},
-		{"SBX_DOCKER_DISK", 512 << 20, &c.Spec.DockerDiskBytes, "40g"},
+		{"SBX_DOCKER_DISK", 7 << 30, &c.Spec.DockerDiskBytes, "40g"},
 	} {
 		v, e := size(option(getenv, entry.key, entry.defaultValue), entry.min)
 		if e != nil {

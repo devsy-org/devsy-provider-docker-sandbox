@@ -8,9 +8,11 @@ import (
 )
 
 const (
-	testCPUs   = "SBX_CPUS"
-	testMemory = "SBX_MEMORY"
-	testPath   = "SBX_PATH"
+	testCPUs       = "SBX_CPUS"
+	testMemory     = "SBX_MEMORY"
+	testPath       = "SBX_PATH"
+	testDockerDisk = "SBX_DOCKER_DISK"
+	testRootDisk   = "SBX_ROOT_DISK"
 )
 
 func TestLoadRejectsInvalidResources(t *testing.T) {
@@ -20,8 +22,10 @@ func TestLoadRejectsInvalidResources(t *testing.T) {
 		{testMemory, "511m"},
 		{testMemory, "4G"},
 		{testMemory, "9223372036854775807g"},
-		{"SBX_ROOT_DISK", "7g"},
-		{"SBX_DOCKER_DISK", "511m"},
+		{testRootDisk, "7g"},
+		{testDockerDisk, "511m"},
+		{testDockerDisk, "6g"},
+		{testDockerDisk, "7167m"},
 		{testPath, "relative/sbx"},
 		{testPath, "sbx --arg"},
 	}
@@ -88,11 +92,11 @@ func TestRejectMissingIdentity(t *testing.T) {
 
 func TestScopedCleanupIgnoresMachineOptions(t *testing.T) {
 	opts := map[string]string{
-		testPath:          os.Args[0],
-		testCPUs:          "invalid",
-		testMemory:        "garbage",
-		"SBX_ROOT_DISK":   "bad",
-		"SBX_DOCKER_DISK": "bad",
+		testPath:       os.Args[0],
+		testCPUs:       "invalid",
+		testMemory:     "garbage",
+		testRootDisk:   "bad",
+		testDockerDisk: "bad",
 	}
 	c, e := LoadScoped(func(key string) string { return opts[key] })
 	if e != nil {
@@ -104,3 +108,49 @@ func TestScopedCleanupIgnoresMachineOptions(t *testing.T) {
 }
 
 func invalidTestKey(key string) bool { return len(key) != 64 || strings.Contains(key, "first") }
+
+func TestDockerDiskMinimum(t *testing.T) {
+	below := func(value string) string {
+		return "SBX_DOCKER_DISK: size \"" + value + "\" is below the minimum of 7g"
+	}
+	cases := []struct {
+		value   string
+		want    int64
+		wantErr string
+	}{
+		{"512m", 0, below("512m")},
+		{"1g", 0, below("1g")},
+		{"4g", 0, below("4g")},
+		{"6g", 0, below("6g")},
+		{"7167m", 0, below("7167m")},
+		{"7g", 7 << 30, ""},
+		{"7168m", 7 << 30, ""},
+		{"8g", 8 << 30, ""},
+		{"40g", 40 << 30, ""},
+	}
+	for _, tt := range cases {
+		t.Run(tt.value, func(t *testing.T) {
+			opts := map[string]string{testPath: os.Args[0], testDockerDisk: tt.value}
+			cfg, err := Load(func(k string) string { return opts[k] })
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) ||
+					!strings.Contains(err.Error(), "E_CONFIG_DRIFT") {
+					t.Fatalf("got %v, want E_CONFIG_DRIFT containing %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil || cfg.Spec.DockerDiskBytes != tt.want {
+				t.Fatalf("got %d, %v, want %d", cfg.Spec.DockerDiskBytes, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestRootDiskMinimumMessage(t *testing.T) {
+	opts := map[string]string{testPath: os.Args[0], testRootDisk: "7g"}
+	_, err := Load(func(k string) string { return opts[k] })
+	if err == nil ||
+		!strings.Contains(err.Error(), "SBX_ROOT_DISK: size \"7g\" is below the minimum of 8g") {
+		t.Fatalf("unexpected error %v", err)
+	}
+}

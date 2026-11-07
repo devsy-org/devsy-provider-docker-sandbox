@@ -95,3 +95,40 @@ func TestMeasuredGuestDiskProbe(t *testing.T) {
 		t.Fatal("zero requested disk capacity accepted")
 	}
 }
+
+func TestQualifiedDockerDiskMeasurementsV0501Darwin(t *testing.T) {
+	root := int64(8350298112)
+	cases := []struct {
+		requestedMiB int64
+		measured     int64
+		accepted     bool
+	}{
+		{512, 510873600, false},
+		{1024, 1020702720, false},
+		{2048, 2040373248, false},
+		{4096, 4143677440, false},
+		{6144, 6249086976, false},
+		{6656, 6772027392, true},
+		{7168, 7298117632, true},
+		{7680, 7824207872, true},
+		{8192, 8350298112, true},
+		{9216, 9407123456, true},
+		{16384, 16729894912, true},
+		{40960, 41956900864, true},
+	}
+	for _, tt := range cases {
+		spec := config.Spec{RootDiskBytes: 8 << 30, DockerDiskBytes: tt.requestedMiB << 20}
+		checks := Checks(spec)
+		data := fmt.Appendf(nil, "29 65072\n%d 1\n%d 1\n", root, tt.measured)
+		err := Match(checks[len(checks)-1], data)
+		if (err == nil) != tt.accepted {
+			t.Errorf(
+				"%dMiB measured %d: accepted=%v want %v",
+				tt.requestedMiB,
+				tt.measured,
+				err == nil,
+				tt.accepted,
+			)
+		}
+	}
+}
