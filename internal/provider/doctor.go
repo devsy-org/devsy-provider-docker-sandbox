@@ -46,7 +46,7 @@ func joinBackendErrors(first, second string) string {
 func (p Provider) doctorVersion(ctx context.Context, out *Diagnosis) {
 	v, e := p.Backend.Version(ctx)
 	if e != nil {
-		out.BackendError = e.Error()
+		p.doctorBackendError(out, e)
 		return
 	}
 	daemon, e := sbx.DaemonVersion(v, p.Profile)
@@ -89,13 +89,26 @@ func (p Provider) doctorBackend(ctx context.Context, out *Diagnosis, r state.Rec
 	}
 	p.doctorVersion(ctx, out)
 	if out.Record == nil {
+		_, e := p.Backend.Inventory(ctx, p.Profile)
+		if e != nil {
+			p.doctorBackendError(out, e)
+		}
 		return
 	}
 	item, found, e := p.observeAllowingAttached(ctx, r)
 	if e != nil {
-		out.BackendError = joinBackendErrors(out.BackendError, e.Error())
+		p.doctorBackendError(out, e)
 	} else if found {
 		out.Backend = &item
+	}
+}
+
+func (p Provider) doctorBackendError(out *Diagnosis, err error) {
+	out.BackendError = joinBackendErrors(out.BackendError, err.Error())
+	var tagged *compat.Error
+	if errors.As(err, &tagged) && tagged.Code == "E_SBX_DAEMON_RESTART" {
+		out.CompatibilityState = compatibilityWarning
+		out.Warnings = append(out.Warnings, err.Error())
 	}
 }
 

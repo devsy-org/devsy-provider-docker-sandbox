@@ -26,6 +26,8 @@ A sandbox state string that the profile does not list is handled by verb. Stop, 
 
 ## Code quality and Go behavior
 
+Report a required daemon restart with an actionable error and never restart it automatically.
+
 Follow idiomatic Go. Prefer simple functions, explicit errors, and clear ownership of processes, streams, and temporary files. The `revive` `exported` and `package-comments` rules are disabled to honor the no-comments rule.
 
 Keep literal process arguments, byte-preserving streams, guest exits, cancellation acknowledgement and durable child ownership intact. Never infer absence from a failed inventory or delete by name without matching the persisted immutable sandbox ID. Do not log raw commands, credentials or environment dumps. Keep host Docker and host project mounts outside the provider contract. Do not add code comments.

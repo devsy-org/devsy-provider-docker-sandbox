@@ -65,6 +65,20 @@ func observedLoginFailure(data []byte) bool {
   try: sbx login`
 }
 
+func RestartError(data []byte) error {
+	message := string(data)
+	if !strings.Contains(message, "needs to restart") ||
+		(!strings.Contains(message, "cannot prompt for restart") &&
+			!strings.Contains(message, "try: sbx daemon restart")) {
+		return nil
+	}
+	return compat.Fail(
+		"E_SBX_DAEMON_RESTART",
+		"run sbx daemon restart in a terminal and retry; this stops running sandboxes; "+
+			"the provider never restarts the daemon itself",
+	)
+}
+
 func childEnv(extra []string) []string {
 	inherited := os.Environ()
 	env := make([]string, 0, len(inherited)+len(extra))
@@ -111,6 +125,9 @@ func (c Client) Control(
 	if e != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
+		}
+		if restartErr := RestartError(stderr.data); restartErr != nil {
+			return nil, restartErr
 		}
 		if observedLoginFailure(stderr.data) {
 			return nil, compat.Fail(

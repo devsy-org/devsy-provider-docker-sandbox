@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/devsy-org/devsy-provider-docker-sandbox/internal/compat"
 	"github.com/devsy-org/devsy-provider-docker-sandbox/internal/state"
 )
 
@@ -33,6 +34,7 @@ const (
 const fakeSource = `package main
 import("encoding/json";"io";"os";"time";"strings")
 func main(){if len(os.Args)<2{os.Exit(1)};
+if os.Getenv("RESTART_ERROR")!=""{os.Stderr.WriteString(os.Getenv("RESTART_ERROR"));os.Exit(1)};
 switch os.Args[1]{
 case "version":
 os.Stdout.WriteString("{\"client\":{\"version\":\"v0.50.1\",\"revision\":\"observed\"}," +
@@ -96,6 +98,22 @@ func TestFakeVersionAndInventory(t *testing.T) {
 	)
 	if e != nil || string(data) != "[]" {
 		t.Fatalf("inventory failed: %s %v", data, e)
+	}
+}
+
+func TestControlDaemonRestart(t *testing.T) {
+	c := testClient(t)
+	for _, message := range []string{
+		"needs to restart; cannot prompt for restart",
+		"needs to restart; try: sbx daemon restart",
+	} {
+		t.Setenv("RESTART_ERROR", message)
+		_, err := c.Control(context.Background(), time.Second, []string{"ls"}, nil)
+		var tagged *compat.Error
+		if !errors.As(err, &tagged) || tagged.Code != "E_SBX_DAEMON_RESTART" ||
+			!strings.Contains(err.Error(), "stops running sandboxes") {
+			t.Fatalf("unexpected error: %v", err)
+		}
 	}
 }
 

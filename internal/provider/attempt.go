@@ -192,6 +192,11 @@ func (p Provider) controlAttempt(
 		return nil, compat.Fail(codeSBXSchema, "sbx control output exceeded 16 MiB")
 	}
 	if e != nil {
+		if ctx.Err() == nil {
+			if restartErr := sbx.RestartError(stderr.data); restartErr != nil {
+				return nil, restartErr
+			}
+		}
 		return nil, p.quotedError(ctx, kind, e)
 	}
 	return stdout.data, nil
