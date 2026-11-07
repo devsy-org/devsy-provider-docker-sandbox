@@ -1,0 +1,11 @@
+{
+  "observed_at": "2026-11-07",
+  "host": "darwin/arm64",
+  "sbx_version": "v0.51.0",
+  "sbx_revision": "7d55286de0c775148b985ed349f760f1eba06203",
+  "daemon_version": "v0.50.1",
+  "daemon_revision": "ddb0268d7124b9cf98955d0b08ffd71a0dfcebe4",
+  "captures": [
+    {"file":"inventory-daemon-restart.stderr","sha256":"daf70a47145cb88a83909c97d13233cdbf329eda7b5b748304cf7ad1499de97f","kind":"daemon_restart_required","command":"sbx ls --format json","exit":1,"stream":"stderr"}
+  ]
+}

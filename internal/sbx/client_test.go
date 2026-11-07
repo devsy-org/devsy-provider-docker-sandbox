@@ -103,17 +103,28 @@ func TestFakeVersionAndInventory(t *testing.T) {
 
 func TestControlDaemonRestart(t *testing.T) {
 	c := testClient(t)
-	for _, message := range []string{
-		"needs to restart; cannot prompt for restart",
-		"needs to restart; try: sbx daemon restart",
-	} {
-		t.Setenv("RESTART_ERROR", message)
-		_, err := c.Control(context.Background(), time.Second, []string{"ls"}, nil)
-		var tagged *compat.Error
-		if !errors.As(err, &tagged) || tagged.Code != "E_SBX_DAEMON_RESTART" ||
-			!strings.Contains(err.Error(), "stops running sandboxes") {
-			t.Fatalf("unexpected error: %v", err)
-		}
+	message, err := os.ReadFile(
+		filepath.Join("testdata", "v0.51.0", "inventory-daemon-restart.stderr"),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("RESTART_ERROR", string(message))
+	_, err = c.Control(context.Background(), time.Second, []string{"ls"}, nil)
+	var tagged *compat.Error
+	if !errors.As(err, &tagged) || tagged.Code != "E_SBX_DAEMON_RESTART" ||
+		!strings.Contains(err.Error(), "stops running sandboxes") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestControlUnrelatedFailure(t *testing.T) {
+	c := testClient(t)
+	t.Setenv("RESTART_ERROR", "connection refused")
+	_, err := c.Control(context.Background(), time.Second, []string{"ls"}, nil)
+	var tagged *compat.Error
+	if err == nil || errors.As(err, &tagged) {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

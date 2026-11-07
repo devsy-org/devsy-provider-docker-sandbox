@@ -6,8 +6,6 @@ This provider runs Devsy machines in Docker Sandboxes microVMs.
 
 Install and sign in to Docker's standalone `sbx` executable. Devsy `v1.27.0-beta.4` or newer is required.
 
-If an `sbx` update requires a daemon restart, run `sbx daemon restart` in a terminal and retry. This stops running sandboxes. The provider never restarts the daemon itself.
-
 ## Install
 
 For a stable release:
