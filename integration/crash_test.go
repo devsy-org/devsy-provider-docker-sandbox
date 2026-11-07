@@ -44,9 +44,14 @@ func TestNativeProviderCrash(t *testing.T) {
 	if sandboxNames(t, h.ctx, h.backend)[r.SandboxName] {
 		t.Fatal("delete left an orphan sandbox")
 	}
-	output, err := h.command("status").CombinedOutput()
-	if err == nil || !bytes.Contains(output, []byte("E_MACHINE_MISSING")) {
-		t.Fatalf("deleted owned machine did not fail closed: %v: %s", err, output)
+	stdout, stderr, err := h.capture("status")
+	if err == nil || len(stdout) != 0 || !bytes.Contains(stderr, []byte("E_MACHINE_MISSING")) {
+		t.Fatalf(
+			"deleted owned machine did not fail closed: %v: stdout %q stderr %q",
+			err,
+			stdout,
+			stderr,
+		)
 	}
 	deleted := h.record()
 	if deleted.Phase != "deleted" || deleted.Operation != nil || deleted.SandboxID != r.SandboxID {
@@ -148,9 +153,14 @@ func (h *crashHarness) recoverStart(attempt state.Attempt) {
 	if r.Operation == nil || r.Operation.ID != attempt.OperationID {
 		h.t.Fatal("interrupted start operation was lost")
 	}
-	output, err := h.command("status").CombinedOutput()
-	if err == nil || !bytes.Contains(output, []byte("E_UNCLEAN_ATTEMPT")) {
-		h.t.Fatalf("status accepted interrupted child: %v: %s", err, output)
+	stdout, stderr, err := h.capture("status")
+	if err == nil || len(stdout) != 0 || !bytes.Contains(stderr, []byte("E_UNCLEAN_ATTEMPT")) {
+		h.t.Fatalf(
+			"status accepted interrupted child: %v: stdout %q stderr %q",
+			err,
+			stdout,
+			stderr,
+		)
 	}
 	h.terminateAttempt(attempt)
 	h.run(
@@ -172,12 +182,13 @@ func (h *crashHarness) recoverStart(attempt state.Attempt) {
 
 func (h *crashHarness) settleOperation(r state.Record) {
 	h.t.Helper()
-	output, err := h.command(h.backendRecoveryArgs(r)...).CombinedOutput()
-	if err == nil || !bytes.Contains(output, []byte("E_OPERATION_UNCERTAIN")) {
+	stdout, stderr, err := h.capture(h.backendRecoveryArgs(r)...)
+	if err == nil || len(stdout) != 0 || !bytes.Contains(stderr, []byte("E_OPERATION_UNCERTAIN")) {
 		h.t.Fatalf(
-			"backend acknowledgement lost explicit reconciliation requirement: %v: %s",
+			"backend acknowledgement lost explicit reconciliation requirement: %v: stdout %q stderr %q",
 			err,
-			output,
+			stdout,
+			stderr,
 		)
 	}
 	r = h.record()
@@ -273,11 +284,19 @@ func (h *crashHarness) command(args ...string) *exec.Cmd {
 
 func (h *crashHarness) run(args ...string) []byte {
 	h.t.Helper()
-	output, err := h.command(args...).CombinedOutput()
+	stdout, stderr, err := h.capture(args...)
 	if err != nil {
-		h.t.Fatalf("provider %s: %v: %s", args[0], err, output)
+		h.t.Fatalf("provider %s: %v: stdout %q stderr %q", args[0], err, stdout, stderr)
 	}
-	return output
+	return stdout
+}
+
+func (h *crashHarness) capture(args ...string) ([]byte, []byte, error) {
+	command := h.command(args...)
+	var stdout, stderr bytes.Buffer
+	command.Stdout, command.Stderr = &stdout, &stderr
+	err := command.Run()
+	return stdout.Bytes(), stderr.Bytes(), err
 }
 
 func (h *crashHarness) record() state.Record {
