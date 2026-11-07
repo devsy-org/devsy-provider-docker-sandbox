@@ -1164,3 +1164,33 @@ func checkCommandTag(t *testing.T, tc commandOutcomeCase, attemptID string, star
 		t.Fatalf("guest termination for outcome %s = %v", tc.outcome, started)
 	}
 }
+
+func TestCheckSpecAcceptsExistingMachineBelowCreateMinimum(t *testing.T) {
+	env := map[string]string{
+		"SBX_PATH":        os.Args[0],
+		"SBX_DOCKER_DISK": "6656m",
+		"SBX_ROOT_DISK":   "8g",
+	}
+	getenv := func(k string) string { return env[k] }
+	if _, e := config.Load(getenv); e == nil {
+		t.Fatal("create config accepted a docker disk below the minimum")
+	}
+	cfg, e := config.LoadExisting(getenv)
+	requireNoError(t, e)
+	p := localProvider(t)
+	p.Config = cfg
+	r, e := state.New(p.Identity, config.Spec{
+		CPUs: cfg.Spec.CPUs, MemoryBytes: cfg.Spec.MemoryBytes,
+		RootDiskBytes: 8 << 30, DockerDiskBytes: 6656 << 20,
+		WorkspaceMode: cfg.Spec.WorkspaceMode, Agent: cfg.Spec.Agent, Skills: cfg.Spec.Skills,
+	})
+	requireNoError(t, e)
+	requireNoError(t, p.checkSpec(r))
+	env["SBX_DOCKER_DISK"] = "6144m"
+	changed, e := config.LoadExisting(getenv)
+	requireNoError(t, e)
+	p.Config = changed
+	if e = p.checkSpec(r); e == nil || !strings.Contains(e.Error(), "E_CONFIG_DRIFT") {
+		t.Fatalf("got %v, want E_CONFIG_DRIFT for a real size change", e)
+	}
+}

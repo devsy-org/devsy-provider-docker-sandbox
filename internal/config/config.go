@@ -131,6 +131,14 @@ func executable(getenv func(string) string) (string, error) {
 }
 
 func Load(getenv func(string) string) (Config, error) {
+	return load(getenv, true)
+}
+
+func LoadExisting(getenv func(string) string) (Config, error) {
+	return load(getenv, false)
+}
+
+func load(getenv func(string) string, enforceMinimums bool) (Config, error) {
 	c := Config{Getenv: getenv, Devsy: getenv("DEVSY")}
 	path, err := executable(getenv)
 	if err != nil {
@@ -156,7 +164,11 @@ func Load(getenv func(string) string) (Config, error) {
 		{"SBX_ROOT_DISK", 8 << 30, &c.Spec.RootDiskBytes, "40g"},
 		{"SBX_DOCKER_DISK", 7 << 30, &c.Spec.DockerDiskBytes, "40g"},
 	} {
-		v, e := size(option(getenv, entry.key, entry.defaultValue), entry.min)
+		minimum := entry.min
+		if !enforceMinimums {
+			minimum = 0
+		}
+		v, e := size(option(getenv, entry.key, entry.defaultValue), minimum)
 		if e != nil {
 			return c, compat.Fail("E_CONFIG_DRIFT", "%s: %v", entry.key, e)
 		}

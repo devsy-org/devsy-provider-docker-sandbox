@@ -22,6 +22,10 @@ var version = "development"
 const (
 	recoverVerb = "recover"
 	initVerb    = "init"
+	createVerb  = "create"
+	startVerb   = "start"
+	statusVerb  = "status"
+	deleteVerb  = "delete"
 )
 
 func usage() {
@@ -48,11 +52,11 @@ type handler func(invocation) error
 
 var handlers = map[string]handler{
 	initVerb: runInit, "doctor": runDoctor, recoverVerb: runRecover,
-	"create": func(i invocation) error { return i.p.Create(i.ctx) },
-	"start":  func(i invocation) error { return i.p.Start(i.ctx) },
-	"stop":   func(i invocation) error { return i.p.Stop(i.ctx) },
-	"delete": func(i invocation) error { return i.p.Delete(i.ctx) },
-	"status": runStatus, "describe": runDescribe, "command": runCommand,
+	createVerb: func(i invocation) error { return i.p.Create(i.ctx) },
+	startVerb:  func(i invocation) error { return i.p.Start(i.ctx) },
+	"stop":     func(i invocation) error { return i.p.Stop(i.ctx) },
+	deleteVerb: func(i invocation) error { return i.p.Delete(i.ctx) },
+	statusVerb: runStatus, "describe": runDescribe, "command": runCommand,
 }
 
 func parseOptions(verb string, args []string) (options, error) {
@@ -147,7 +151,7 @@ func dispatch(i invocation, verb string, h handler) error {
 }
 
 func warnUnqualifiedHost(w io.Writer, profile compat.Profile, verb string) {
-	if verb != initVerb && verb != "create" && verb != "start" {
+	if verb != initVerb && verb != createVerb && verb != startVerb {
 		return
 	}
 	if warning := profile.HostWarning(); warning != "" {
@@ -157,9 +161,12 @@ func warnUnqualifiedHost(w io.Writer, profile compat.Profile, verb string) {
 
 func loadConfig(verb, key string) (config.Config, error) {
 	if key == "" {
-		return config.Load(os.Getenv)
+		if verb == initVerb || verb == createVerb {
+			return config.Load(os.Getenv)
+		}
+		return config.LoadExisting(os.Getenv)
 	}
-	if verb != "delete" && verb != recoverVerb {
+	if verb != deleteVerb && verb != recoverVerb {
 		return config.Config{}, compat.Fail(
 			"E_STATE_MISSING",
 			"--machine-key only applies to delete and recover",
