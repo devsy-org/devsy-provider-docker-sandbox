@@ -146,8 +146,9 @@ func (c Client) Control(
 }
 
 type Process struct {
-	Cmd  *exec.Cmd
-	done chan error
+	Cmd    *exec.Cmd
+	done   chan error
+	stderr *latchWriter
 }
 
 func (p *Process) PID() int { return p.Cmd.Process.Pid }
@@ -175,14 +176,18 @@ func (c Client) Start(ctx context.Context, request StartRequest) (*Process, erro
 	}
 	cmd.Stdin = request.Stdin
 	cmd.Stdout = request.Stdout
-	cmd.Stderr = request.Stderr
+	var stderr *latchWriter
+	if request.Stderr != nil {
+		stderr = newLatchWriter(request.Stderr)
+		cmd.Stderr = stderr
+	}
 	if e = ctx.Err(); e != nil {
 		return nil, errors.Join(e, compat.Wrap("E_STORAGE", cleanup()))
 	}
 	if e = cmd.Start(); e != nil {
 		return nil, errors.Join(e, compat.Wrap("E_STORAGE", cleanup()))
 	}
-	p := &Process{Cmd: cmd, done: make(chan error, 1)}
+	p := &Process{Cmd: cmd, done: make(chan error, 1), stderr: stderr}
 	go func() {
 		waitErr := cmd.Wait()
 		p.done <- errors.Join(waitErr, compat.Wrap("E_STORAGE", cleanup()))
@@ -248,6 +253,7 @@ func (p *Process) cancelAndWait(ctx context.Context) error {
 
 func (p *Process) interruptOwned() error {
 	var terminationErr error
+	p.stderr.latch()
 	if p.Cmd.Stdin != nil && p.Cmd.Stdin != os.Stdin {
 		if input, ok := p.Cmd.Stdin.(io.Closer); ok {
 			if err := input.Close(); err != nil && !errors.Is(err, os.ErrClosed) {
