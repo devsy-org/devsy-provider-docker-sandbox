@@ -300,6 +300,7 @@ func fakeDevsy(t *testing.T) string {
 }
 
 func TestUnknownVersionStillRejectsUndecodableOutput(t *testing.T) {
+	restart := daemonRestartError(t)
 	for _, tc := range []struct {
 		name   string
 		mutate func(*versionFixture)
@@ -317,6 +318,9 @@ func TestUnknownVersionStillRejectsUndecodableOutput(t *testing.T) {
 		{"undecodable inventory", func(f *versionFixture) {
 			f.backend.inventory = compat.Fail(codeSBXSchema, "invalid sbx inventory JSON")
 		}, codeSBXSchema},
+		{"daemon restart", func(f *versionFixture) {
+			f.backend.inventory = restart
+		}, "E_SBX_DAEMON_RESTART"},
 		{"undecodable version", func(f *versionFixture) {
 			f.backend.versionErr = compat.Fail(codeSBXSchema, "invalid sbx version JSON")
 		}, codeSBXSchema},
@@ -375,4 +379,36 @@ func TestDoctorReportsQualifiedVersionWithoutWarning(t *testing.T) {
 		parsed.BackendError != "" {
 		t.Fatalf("doctor = %+v", parsed)
 	}
+}
+
+func TestDoctorReportsDaemonRestart(t *testing.T) {
+	restart := daemonRestartError(t)
+	for _, saved := range []bool{false, true} {
+		f := buildVersionFixture(t, true, saved)
+		f.p.Config.SBXPath = "unit-sbx"
+		f.backend.inventory = restart
+		f.p.Backend = f.backend
+		data, err := f.p.Doctor(context.Background())
+		requireNoError(t, err)
+		var result Diagnosis
+		requireNoError(t, json.Unmarshal(data, &result))
+		if result.CompatibilityState != compatibilityWarning ||
+			!strings.Contains(result.BackendError, "E_SBX_DAEMON_RESTART") ||
+			!slices.Contains(result.Warnings, f.backend.inventory.Error()) {
+			t.Fatalf("doctor = %+v", result)
+		}
+	}
+}
+
+func daemonRestartError(t *testing.T) error {
+	t.Helper()
+	data, err := os.ReadFile(
+		filepath.Join("..", "sbx", "testdata", "v0.51.0", "inventory-daemon-restart.stderr"),
+	)
+	requireNoError(t, err)
+	restart := sbx.RestartError(data)
+	if restart == nil {
+		t.Fatal("restart fixture was not recognized")
+	}
+	return restart
 }

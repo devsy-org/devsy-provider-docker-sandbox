@@ -1,0 +1,5 @@
+  Client Version:  v0.51.0 7d55286de0c775148b985ed349f760f1eba06203
+  Server Version:  v0.50.1 ddb0268d7124b9cf98955d0b08ffd71a0dfcebe4
+warning: Docker Sandboxes has been updated and needs to restart; all running sandboxes will be stopped
+error: ensure daemon: cannot prompt for restart: stdin is not a terminal; run the command in an interactive terminal to confirm the restart
+  try: sbx daemon restart
