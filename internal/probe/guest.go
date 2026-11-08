@@ -62,10 +62,7 @@ func Checks(spec config.Spec) []Check {
 
 func Match(check Check, data []byte) error {
 	if check.diskProbe {
-		if !matchDiskCapacity(check.disk, data) {
-			return errors.New("guest capability check failed")
-		}
-		return nil
+		return matchDiskCapacity(check.disk, data)
 	}
 	if strings.TrimSpace(string(data)) != strings.TrimSpace(check.Expected) {
 		return errors.New("guest capability check failed")
@@ -73,21 +70,61 @@ func Match(check Check, data []byte) error {
 	return nil
 }
 
-func matchDiskCapacity(requirement diskRequirement, data []byte) bool {
+func matchDiskCapacity(requirement diskRequirement, data []byte) error {
+	failed := errors.New("guest capability check failed")
 	fields := strings.Fields(string(data))
 	if requirement.rootBytes <= 0 || requirement.dockerBytes <= 0 || len(fields) != 6 {
-		return false
+		return failed
 	}
 	var values [6]int64
 	for i, field := range fields {
 		value, err := strconv.ParseInt(field, 10, 64)
 		if err != nil {
-			return false
+			return failed
 		}
 		values[i] = value
 	}
-	return values[0] != values[1] && validCapacity(values[2], values[3], requirement.rootBytes) &&
-		validCapacity(values[4], values[5], requirement.dockerBytes)
+	if values[0] == values[1] {
+		return failed
+	}
+	if err := checkCapacity(
+		"root disk (SBX_ROOT_DISK)",
+		values[2],
+		values[3],
+		requirement.rootBytes,
+	); err != nil {
+		return err
+	}
+	return checkCapacity(
+		"Docker disk (SBX_DOCKER_DISK)",
+		values[4],
+		values[5],
+		requirement.dockerBytes,
+	)
+}
+
+func checkCapacity(name string, capacity, available, requested int64) error {
+	if validCapacity(capacity, available, requested) {
+		return nil
+	}
+	if capacity >= 0 && capacity < minimumCapacity(requested) {
+		return fmt.Errorf(
+			"guest capability check failed: %s requested %s, guest reports %s, %.2f percent short "+
+				"of the request and past the 3 percent allowance; a larger size such as %dg may pass",
+			name, describeBytes(requested), describeBytes(capacity),
+			float64(requested-capacity)*100/float64(requested), suggestedGiB(requested),
+		)
+	}
+	return errors.New("guest capability check failed")
+}
+
+func describeBytes(n int64) string {
+	return fmt.Sprintf("%d bytes (%.2f GiB)", n, float64(n)/(1<<30))
+}
+
+func suggestedGiB(requested int64) int64 {
+	next := (requested+(1<<30)-1)>>30 + 1
+	return max(next, 8)
 }
 
 func minimumCapacity(requested int64) int64 {

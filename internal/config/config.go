@@ -52,20 +52,27 @@ func option(getenv func(string) string, k, def string) string {
 	return def
 }
 
+func invalidSize(s string) error {
+	return fmt.Errorf(
+		"invalid size %q: use a positive whole number with a lowercase m or g suffix, such as 8g or 7680m",
+		s,
+	)
+}
+
 func size(s string, minimum int64) (int64, error) {
 	if len(s) < 2 {
-		return 0, fmt.Errorf("invalid size %q", s)
+		return 0, invalidSize(s)
 	}
 	n, err := strconv.ParseInt(s[:len(s)-1], 10, 64)
 	if err != nil || n <= 0 {
-		return 0, fmt.Errorf("invalid size %q", s)
+		return 0, invalidSize(s)
 	}
 	unit := s[len(s)-1]
 	multiplier := int64(1 << 20)
 	if unit == 'g' {
 		multiplier = 1 << 30
 	} else if unit != 'm' {
-		return 0, fmt.Errorf("invalid size %q", s)
+		return 0, invalidSize(s)
 	}
 	if n > int64(^uint64(0)>>1)/multiplier {
 		return 0, errors.New("size overflow")
