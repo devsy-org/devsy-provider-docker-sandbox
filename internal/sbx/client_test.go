@@ -58,9 +58,14 @@ default:if strings.Contains(os.Args[1],"--all"){os.Exit(2)};os.Exit(1)}}`
 
 func fakeBinary(t *testing.T) string {
 	t.Helper()
+	return buildFake(t, fakeSource)
+}
+
+func buildFake(t *testing.T, program string) string {
+	t.Helper()
 	dir := t.TempDir()
 	source := filepath.Join(dir, "main.go")
-	if e := os.WriteFile(source, []byte(fakeSource), 0o600); e != nil {
+	if e := os.WriteFile(source, []byte(program), 0o600); e != nil {
 		t.Fatal(e)
 	}
 	binary := filepath.Join(dir, "fake-sbx")
