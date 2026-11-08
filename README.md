@@ -18,11 +18,12 @@ Until a stable release exists:
 
 ```sh
 devsy provider add --use=false --name docker-sandbox https://github.com/devsy-org/devsy-provider-docker-sandbox/releases/download/v0.1.1/provider.yaml
+devsy provider init docker-sandbox
 ```
 
 ## Hosts
 
-Natively qualified: darwin/arm64. Built and unit tested: linux/amd64, linux/arm64, windows/amd64. Unqualified hosts run with a warning.
+Natively qualified: darwin/arm64. Built and unit tested: linux/amd64, linux/arm64, windows/amd64. Unqualified hosts run with a warning in builds from `main`. The v0.1.1 release supports only darwin/arm64 and `sbx` v0.50.1.
 
 Customer documentation: [Docker Sandboxes provider](https://devsy.sh/docs/managing-providers/docker-sandbox).
 
