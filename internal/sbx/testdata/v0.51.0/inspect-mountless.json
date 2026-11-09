@@ -1,0 +1,28 @@
+{
+  "name": "devsy-qual-051-20261109",
+  "agent": "shell",
+  "kits": [
+    "docker.io/sbx/shell@sha256:13d250dc2795739484b6e99e1fab3d482b8d2dcf32268181b86e97bd44750ef5"
+  ],
+  "state": "running",
+  "created_version": "v0.51.0",
+  "uptime": "44s",
+  "image": "sandbox-kit-assembled:87b284d61db094a0",
+  "image_digest": "sha256:13d250dc2795739484b6e99e1fab3d482b8d2dcf32268181b86e97bd44750ef5",
+  "cpus": 2,
+  "memory": "2048m",
+  "network": "devsy-qual-051-20261109",
+  "network_policy": {
+    "scope": "global"
+  },
+  "proxy": "172.17.0.0:3128",
+  "detached": true,
+  "mcp_gateway": true,
+  "runtime_mounts": [],
+  "sessions": 0,
+  "daemon_version": "v0.51.0",
+  "daemon_uptime": "2m",
+  "host_mounts": [],
+  "working_dir": "",
+  "effective_working_dir": "/home/agent/workspace"
+}

@@ -924,7 +924,7 @@ func TestStatusDeletedRecordWithMissingOwnedIDIsNotNotFound(t *testing.T) {
 func TestDeleteRefusesUnrecordedBackendWithoutLeavingActiveOperation(t *testing.T) {
 	p := localProvider(t)
 	p.Profile = simulatedProfile(t)
-	p.Profile.OperationResultSchema = compat.OperationResultSchemaV0501
+	p.Profile.OperationResultSchema = compat.OperationResultSchema
 	r, err := state.New(p.Identity, config.Spec{CPUs: 1})
 	requireNoError(t, err)
 	if err := p.Store.Save(r); err != nil {

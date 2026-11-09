@@ -61,11 +61,13 @@ The `concurrency_crash` evidence needs concurrent guest sessions and `TestNative
 
 `internal/compat/profile.json` is the source of truth:
 
-- `sbx` client `v0.50.1`, revision `ddb0268d7124b9cf98955d0b08ffd71a0dfcebe4`, daemon `v0.50.1`.
+- `sbx` client `v0.51.0`, revision `7d55286de0c775148b985ed349f760f1eba06203`, daemon `v0.51.0`.
 - Qualified host: `darwin/arm64`.
 - Minimum Devsy core: `v1.27.0-beta.4`.
 
 Every other host is built and unit tested only. It still runs, with one warning that says so, and `doctor` reports the same warning. Only the host check and the per-host disk sizing check depend on `qualified_hosts`.
+
+The qualified version is the latest stable `sbx` release. Pre-releases are not qualified.
 
 ### Fixtures
 

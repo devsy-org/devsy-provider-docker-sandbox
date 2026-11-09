@@ -21,9 +21,9 @@ var profileFS embed.FS
 const IssuesURL = "https://github.com/devsy-org/devsy-provider-docker-sandbox/issues"
 
 const (
-	ShellSettingSchemaV0501          = "v0.50.1/effective-shell-setting"
-	OperationResultSchemaV0501       = "v0.50.1/action-resource-name"
-	DiskSizingSchemaDarwinARM64V0501 = "v0.50.1/darwin-arm64/3-percent-overhead"
+	ShellSettingSchema          = "effective-shell-setting"
+	OperationResultSchema       = "action-resource-name"
+	DiskSizingSchemaDarwinARM64 = "darwin-arm64/3-percent-overhead"
 )
 
 type Profile struct {
@@ -358,14 +358,14 @@ func (p Profile) RequireInventorySchema() error {
 }
 
 func (p Profile) RequireShellSchema() error {
-	if p.ShellSettingSchema != ShellSettingSchemaV0501 {
+	if p.ShellSettingSchema != ShellSettingSchema {
 		return Fail("E_SHELL_OVERRIDE", "effective shell shortcut settings have not been qualified")
 	}
 	return nil
 }
 
 func (p Profile) RequireOperationResultSchema() error {
-	if p.OperationResultSchema != OperationResultSchemaV0501 {
+	if p.OperationResultSchema != OperationResultSchema {
 		return Fail(
 			"E_SBX_SCHEMA",
 			"successful sbx stop/remove JSON has no qualified result schema",
@@ -375,11 +375,17 @@ func (p Profile) RequireOperationResultSchema() error {
 }
 
 func MeasuredDiskSizingSchema(host, version, revision string) string {
-	if host == "darwin/arm64" && version == "v0.50.1" &&
-		revision == "ddb0268d7124b9cf98955d0b08ffd71a0dfcebe4" {
-		return DiskSizingSchemaDarwinARM64V0501
+	p, err := Load()
+	if err != nil || !slices.Contains(p.QualifiedHosts, host) ||
+		!slices.Contains(p.QualifiedSBXVersions, version) || revision == "" ||
+		p.QualifiedSBXRevisions[version] != revision {
+		return ""
 	}
-	return ""
+	expected := strings.ReplaceAll(host, "/", "-") + "/3-percent-overhead"
+	if p.DiskSizingSchemas[host] != expected {
+		return ""
+	}
+	return expected
 }
 
 func (p Profile) RequireDiskSizingQualification() error {

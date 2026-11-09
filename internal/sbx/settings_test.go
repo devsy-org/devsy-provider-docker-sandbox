@@ -62,7 +62,7 @@ func TestCheckShellSetting(t *testing.T) {
 
 func TestShellSettingsReadOnly(t *testing.T) {
 	client := testClient(t)
-	profile := compat.Profile{ShellSettingSchema: compat.ShellSettingSchemaV0501}
+	profile := compat.Profile{ShellSettingSchema: compat.ShellSettingSchema}
 	if err := client.ShellSettings(context.Background(), profile, false); err != nil {
 		t.Fatal(err)
 	}

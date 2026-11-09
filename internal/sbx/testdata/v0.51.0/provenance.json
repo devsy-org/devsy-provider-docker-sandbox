@@ -1,11 +1,104 @@
 {
-  "observed_at": "2026-11-07",
+  "observed_at": "2026-11-09",
   "host": "darwin/arm64",
   "sbx_version": "v0.51.0",
   "sbx_revision": "7d55286de0c775148b985ed349f760f1eba06203",
-  "daemon_version": "v0.50.1",
-  "daemon_revision": "ddb0268d7124b9cf98955d0b08ffd71a0dfcebe4",
+  "daemon_version": "v0.51.0",
+  "daemon_revision": "7d55286de0c775148b985ed349f760f1eba06203",
   "captures": [
-    {"file":"inventory-daemon-restart.stderr","sha256":"daf70a47145cb88a83909c97d13233cdbf329eda7b5b748304cf7ad1499de97f","kind":"daemon_restart_required","command":"sbx ls --format json","exit":1,"stream":"stderr"}
-  ]
+    {
+      "file": "inventory-daemon-restart.stderr",
+      "sha256": "daf70a47145cb88a83909c97d13233cdbf329eda7b5b748304cf7ad1499de97f",
+      "kind": "daemon_restart_required",
+      "command": "sbx ls --format json",
+      "exit": 1,
+      "stream": "stderr",
+      "observed_at": "2026-11-07",
+      "daemon_version": "v0.50.1",
+      "daemon_revision": "ddb0268d7124b9cf98955d0b08ffd71a0dfcebe4"
+    },
+    {
+      "file": "version-daemon-running.json",
+      "sha256": "ae4cbbb8005c38c083219659ffbf5159bec5404f77ccbb9e8486825af443a18c",
+      "kind": "version",
+      "command": "sbx version --format json",
+      "exit": 0
+    },
+    {
+      "file": "inventory-empty.json",
+      "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "kind": "inventory_empty",
+      "command": "sbx ls --format json",
+      "exit": 0
+    },
+    {
+      "file": "settings-shell-full.json",
+      "sha256": "b061511bd0e40e026c3e40bbc2bdd3396c99136d1223ff9ba479745a9c2b2087",
+      "kind": "settings",
+      "command": "sbx settings get --json kit.shortcuts.shell",
+      "exit": 0
+    },
+    {
+      "file": "inventory-running.json",
+      "sha256": "cceba3a7e16b7aedb0f2b5651d1bcfe62638040e8b8ceb6a56675c5970a82a50",
+      "kind": "inventory_running",
+      "command": "sbx ls --format json",
+      "exit": 0
+    },
+    {
+      "file": "inspect-mountless.json",
+      "sha256": "bfe74fd90a7c8fba909ce982db32e99015eccf9a8a5cbf50b39354e72c3643d9",
+      "kind": "inspect",
+      "command": "sbx inspect devsy-qual-051-20261109 --format json",
+      "exit": 0
+    },
+    {
+      "file": "filesystem-sized.txt",
+      "sha256": "626ee90347f4cef7fbc89a1452bb6b9558813ff38eba014c75667e86187f3912",
+      "kind": "sizing",
+      "command": "/tmp/sbx-newer-install/bin/sbx exec --interactive --user root --workdir / devsy-qual-051-20261109 -- /bin/sh -c 'stat -c %d / /var/lib/docker; df -B1 / /var/lib/docker'",
+      "exit": 0
+    },
+    {
+      "file": "stop-result.json",
+      "sha256": "dda232b2d5c2c33712d88390c1763c527587ec9366728181c34b58d44fae86c2",
+      "kind": "stop_result",
+      "command": "sbx stop --format json devsy-qual-051-20261109",
+      "exit": 0
+    },
+    {
+      "file": "inventory-stopped.json",
+      "sha256": "fa13b70248b8e10c5868f6e6420bdd62d2ed62ee0cb2851a78e3b6b476e462ac",
+      "kind": "inventory_stopped",
+      "command": "sbx ls --format json",
+      "exit": 0
+    },
+    {
+      "file": "rm-result.json",
+      "sha256": "8279c4117d2adb3934359f6fada4e60ebe5afdc7f3c070e544c8f7af2386fd25",
+      "kind": "rm_result",
+      "command": "sbx rm --force --format json devsy-qual-051-20261109",
+      "exit": 0
+    },
+    {
+      "file": "inventory-after-remove.json",
+      "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "kind": "inventory_empty",
+      "command": "sbx ls --format json",
+      "exit": 0
+    }
+  ],
+  "sbx_archive_sha256": "1ab45fd1c93d30ceec6fdb228da7698b8b1eebc25cf969027b83a437cef415f9",
+  "sbx_executable_sha256": "08a991d65d0db1fcc079af6e32574ae72dfeb6c4361a7a31fb1c300fe2ae3300",
+  "sizing_requested": {
+    "root_bytes": 25769803776,
+    "docker_bytes": 12884901888
+  },
+  "sizing_observed": {
+    "root_bytes": 25185042432,
+    "docker_bytes": 12573614080,
+    "root_device": 31,
+    "docker_device": 65088
+  },
+  "host_os_version": "darwin 25.6.0"
 }

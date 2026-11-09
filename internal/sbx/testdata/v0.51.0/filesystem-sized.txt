@@ -1,0 +1,5 @@
+31
+65088
+Filesystem       1B-blocks   Used   Available Use% Mounted on
+overlay        25185042432 475136 23879303168   1% /
+/dev/vde       12573614080 860160 11911733248   1% /var/lib/docker

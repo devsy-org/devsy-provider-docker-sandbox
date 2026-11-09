@@ -170,21 +170,17 @@ func TestQualifiedHostDiskCapacityFailsClosed(t *testing.T) {
 	}
 }
 
-func measuredProfile() Profile {
-	return Profile{
-		ShellSettingSchema:    ShellSettingSchemaV0501,
-		OperationResultSchema: OperationResultSchemaV0501,
-		QualifiedSBXVersions:  []string{measuredVersion},
-		QualifiedSBXRevisions: map[string]string{
-			measuredVersion: "ddb0268d7124b9cf98955d0b08ffd71a0dfcebe4",
-		},
-		QualifiedHosts:    []string{"darwin/arm64"},
-		DiskSizingSchemas: map[string]string{"darwin/arm64": DiskSizingSchemaDarwinARM64V0501},
+func measuredProfile(t *testing.T) Profile {
+	t.Helper()
+	p, err := Load()
+	if err != nil {
+		t.Fatal(err)
 	}
+	return p
 }
 
 func TestMeasuredSchemaGates(t *testing.T) {
-	p := measuredProfile()
+	p := measuredProfile(t)
 	if err := p.RequireShellSchema(); err != nil {
 		t.Fatal(err)
 	}
@@ -205,11 +201,11 @@ func TestMeasuredDiskSizingOnQualifiedHost(t *testing.T) {
 	if runtime.GOOS != "darwin" || runtime.GOARCH != "arm64" {
 		t.Skip("measured disk sizing is native to darwin/arm64")
 	}
-	p := measuredProfile()
+	p := measuredProfile(t)
 	if err := p.RequireDiskSizingQualification(); err != nil {
 		t.Fatal(err)
 	}
-	p.QualifiedSBXRevisions[measuredVersion] = unmeasured
+	p.QualifiedSBXRevisions[p.QualifiedSBXVersions[0]] = unmeasured
 	if err := p.RequireDiskSizingQualification(); err == nil {
 		t.Fatal("unmeasured client revision accepted")
 	}
@@ -245,6 +241,33 @@ func TestTupleQualification(t *testing.T) {
 				t.Fatalf("TupleWarning(%+v) = %q", test.tuple, warning)
 			}
 		})
+	}
+}
+
+func TestReleaseProfileTupleBoundaries(t *testing.T) {
+	p := measuredProfile(t)
+	version := p.QualifiedSBXVersions[0]
+	qualified := Tuple{
+		version,
+		p.QualifiedSBXRevisions[version],
+		p.QualifiedDaemonVersions[version][0],
+	}
+	if !p.TupleQualified(qualified) || p.TupleWarning(qualified) != "" {
+		t.Fatal("qualified release tuple warned")
+	}
+	for _, tuple := range []Tuple{
+		{measuredVersion, "ddb0268d7124b9cf98955d0b08ffd71a0dfcebe4", measuredVersion},
+		{"v0.53.0-rc2", "unqualified", "v0.53.0-rc2"},
+		{version, "unqualified", qualified.Daemon},
+		{version, qualified.Revision, measuredVersion},
+	} {
+		if p.TupleQualified(tuple) || !strings.Contains(p.TupleWarning(tuple), "runs best effort") {
+			t.Fatalf("unqualified release tuple did not warn: %+v", tuple)
+		}
+		if MeasuredDiskSizingSchema("darwin/arm64", tuple.Client, tuple.Revision) != "" &&
+			tuple.Client != qualified.Client {
+			t.Fatalf("unqualified client has measured disk sizing: %+v", tuple)
+		}
 	}
 }
 
