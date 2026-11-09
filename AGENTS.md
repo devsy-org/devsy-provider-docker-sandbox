@@ -38,7 +38,7 @@ Running the provider against real sandboxes needs the standalone `sbx` executabl
 
 Native tests are in `integration/` and carry the `native` build tag. They drive real Devsy workspaces on a real `sbx` microVM. A successful build, a unit test run or a client only `sbx version` is not native qualification.
 
-Native tests run only through the `Native VM qualification` workflow (`.github/workflows/e2e.yml`), which `release.yml` calls. They need a runner that has working virtualization and an authenticated `sbx`. The workflow takes runner labels from the repository variables `SBX_NATIVE_RUNNER_MACOS_ARM64`, `SBX_NATIVE_RUNNER_WINDOWS_AMD64`, `SBX_NATIVE_RUNNER_LINUX_AMD64` and `SBX_NATIVE_RUNNER_LINUX_ARM64`, and the `sbx` path from `SBX_NATIVE_EXECUTABLE`. The only qualified host today is darwin/arm64, so the macOS arm64 runner is the one that is needed. The repository does not state whether a GitHub hosted runner can run `sbx`. Use a runner registered under the variable above.
+Release qualification runs the native tests through the `Native VM qualification` workflow (`.github/workflows/e2e.yml`), which `release.yml` calls. Contributors can also run them on a suitable local host before merge. The tests need working virtualization and an authenticated `sbx`. The workflow takes runner labels from the repository variables `SBX_NATIVE_RUNNER_MACOS_ARM64`, `SBX_NATIVE_RUNNER_WINDOWS_AMD64`, `SBX_NATIVE_RUNNER_LINUX_AMD64` and `SBX_NATIVE_RUNNER_LINUX_ARM64`. Each variable holds a JSON value that becomes `runs-on`, for example `["self-hosted","macOS","ARM64"]`. A plain label fails the planning step. The `sbx` path comes from `SBX_NATIVE_EXECUTABLE`. The only qualified host today is darwin/arm64, so the macOS arm64 runner is the one that is needed. The repository does not state whether a GitHub-hosted runner can run `sbx`. Use a runner registered under the variable above.
 
 The workflow builds the Devsy core at the pinned commit, builds `integration/native_cancel.go` as a helper, then runs:
 
@@ -47,6 +47,8 @@ go test -tags=native ./integration -run '^TestNative' -count=1 -v -timeout=75m
 ```
 
 The tests read these environment variables: `DEVSY_NATIVE_CORE_BIN`, `DEVSY_NATIVE_CORE_SOURCE`, `DEVSY_NATIVE_RELEASE_DIR`, `DEVSY_NATIVE_VERSION`, `DEVSY_NATIVE_CANCEL_HELPER`, `SBX_PATH` and `SBX_NATIVE_DENIED_URL`. A test that needs one of them fails when it is missing.
+
+The `concurrency_crash` evidence needs concurrent guest sessions and `TestNativeProviderCrash`. The test builds the provider, records a real `sbx` start, observes the contender's main goroutine waiting with the mutation lock held by the first provider, and kills the first provider. The contender must then finish without changing the interrupted journal. Recovery must mark uncertainty, settle the backend, restore readiness and verify deletion against inventory. Unit tests do not replace this evidence.
 
 ### Qualified Combination
 
@@ -77,11 +79,31 @@ An `sbx` client version, client revision or daemon version outside the qualified
 A sandbox state string that the profile does not list is handled by verb:
 
 - Stop, delete and recover warn once, still require the recorded immutable ID and then proceed.
-- Stop and delete send the `sbx` command and verify the outcome by reading the inventory again. Delete requires the sandbox to be absent. Stop accepts a listed stopped state, or an unlisted state that differs from the one observed before the command. While the state is unchanged, stop keeps waiting and marks the operation uncertain at the timeout.
+- Stop and delete send the `sbx` command and verify the outcome by reading the inventory again. Delete requires the sandbox to be absent. Stop accepts only a listed stopped state. Any other state, including an unlisted one, keeps waiting and marks the operation uncertain at the timeout.
 - Status, create and start stay fail closed on an unrecognized state. Devsy needs a known status token, and a start must not build on a state the provider cannot classify.
 - The `command` verb never prints a version or state warning, so the guest stream stays clean.
+- Devsy surfaces provider standard error from create and start at info level. A create followed by start prints the unqualified host or unknown version warning once per verb. There is no deduplication across processes by design.
+
+Report a required daemon restart with an actionable error and never restart it automatically.
 
 Never infer absence from a failed inventory. Never delete by name without matching the persisted immutable sandbox ID. Keep host Docker and host project mounts outside the provider contract. Do not commit credentials or local journal files.
+
+### Disk Sizing
+
+The configuration minimums come from measured guest capacity on the qualified combination, not from `sbx` limits. The guest filesystem is 2.3 to 5 percent smaller than the request. `SBX_DOCKER_DISK` below 7g (measured: 6g fails at a 3.001 percent shortfall, 6.5g passes by a thin margin) and `SBX_ROOT_DISK` below 8g would fail the 3 percent capacity probe.
+
+- `init` and `create` admit a new sandbox spec. They reject sizes below the minimums with `E_CONFIG_DRIFT`, naming the minimum.
+- Verbs that act on an existing machine (start, stop, delete, status, describe, command, recover) validate the size syntax and skip the minimums, so a machine created at a smaller size can always be stopped and deleted. `checkSpec` still compares the configured sizes with the recorded ones.
+- A size that fails the syntax check names the accepted form: a lowercase `m` or `g` suffix, such as `8g` or `7680m`.
+- A create that fails the guest capacity probe returns `E_GUEST_CAPABILITY`. It names the failing disk, the requested and measured bytes, the shortfall percent and a larger size to try, without promising it passes.
+- The 3 percent bound is unchanged. Raise a minimum only with new measurements, and never loosen the bound.
+
+### Windows State Security
+
+- State directories and files use an explicit protected DACL at creation. It grants full control only to the current process user, SYSTEM and BUILTIN\Administrators. Existing state must have no allow entries for other principals.
+- Reparse points and symlinks are rejected. The owner must be the process token user. BUILTIN\Administrators is also accepted when the process is elevated and the token default owner is BUILTIN\Administrators.
+- State files and directories are opened with reparse point traversal disabled, and the opened handle is validated before use. Provider state ancestors are held open without delete sharing during path operations, so they cannot be swapped for junctions.
+- The pinned `x/sys` `GetSecurityInfo` wrapper frees its native security descriptor and returns a copy managed by Go.
 
 ---
 
@@ -91,7 +113,7 @@ Never infer absence from a failed inventory. Never delete by name without matchi
 
 - **Idiomatic**: Prefer simple functions, explicit errors, and clear ownership of processes, streams and temporary files.
 - **Style Guide**: Use the Uber style guide https://github.com/uber-go/guide/blob/master/style.md.
-- **No code comments**: Do not add comments of any kind, including `//`, `/* */` and lint suppressions such as `nolint` or `nosec`. Names and structure carry the meaning. The `revive` rules `exported` and `package-comments` are disabled for this reason.
+- **No code comments**: Do not add comments of any kind, including `//`, `/* */` and lint suppressions such as `nolint` or `nosec`. Go compiler directives such as the `//go:build native` constraint on native test files are required and stay. Names and structure carry the meaning. The `revive` rules `exported` and `package-comments` are disabled for this reason.
 - **Process handling**: Keep literal process arguments, byte preserving streams, guest exit codes, cancellation acknowledgement and durable child ownership intact.
 - **Logging**: Do not log raw commands, credentials or environment dumps.
 - **Linter**: `golangci-lint` via `mise run lint`. Apply formatting with `mise run format`. Run `mise run lint` before pushing changes.
@@ -104,7 +126,7 @@ Write documentation in plain English, with simple sentences. Do not join sentenc
 
 ## Pull Request and Commit Guidelines
 
-1. **Contributor License Agreement (CLA)**: All contributors sign the CLA. The CLA Assistant check must pass.
+1. **Contributor License Agreement (CLA)**: All contributors sign the CLA by commenting when asked. Bots are allowlisted. The CLA Assistant check must pass.
 2. **Commit messages**: Conventional Commits, with a concise subject line.
 3. **Commit signing**: All commits are required to be signed.
 4. **Branch name**: Name the branch according to the task.
