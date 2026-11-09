@@ -17,7 +17,7 @@ const (
 	unqualified = "unqualified"
 	errArtifact = "artifact"
 	darwinHost  = "darwin/arm64"
-	sbxVersion  = "v0.50.1"
+	sbxVersion  = "v0.51.0"
 )
 
 var artifactNames = map[string]string{
@@ -154,14 +154,14 @@ func qualifiedProfile() profile {
 		QualifiedHosts:       []string{darwinHost},
 		QualifiedSBXVersions: []string{sbxVersion},
 		QualifiedSBXRevisions: map[string]string{
-			sbxVersion: "ddb0268d7124b9cf98955d0b08ffd71a0dfcebe4",
+			sbxVersion: "7d55286de0c775148b985ed349f760f1eba06203",
 		},
 		QualifiedDaemonVersions: map[string][]string{sbxVersion: {sbxVersion}},
-		DaemonSchema:            "v0.50.1/server-running",
-		OperationResultSchema:   compat.OperationResultSchemaV0501,
-		ShellSettingSchema:      compat.ShellSettingSchemaV0501,
+		DaemonSchema:            "v0.51.0/server-running",
+		OperationResultSchema:   compat.OperationResultSchema,
+		ShellSettingSchema:      compat.ShellSettingSchema,
 		DiskSizingSchemas: map[string]string{
-			darwinHost: compat.DiskSizingSchemaDarwinARM64V0501,
+			darwinHost: compat.DiskSizingSchemaDarwinARM64,
 		},
 		InventoryStates: map[string]string{
 			"running": "running", "stopped": "stopped",

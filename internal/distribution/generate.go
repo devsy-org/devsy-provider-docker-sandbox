@@ -117,8 +117,8 @@ func validateProfileFields(qualified profile) error {
 }
 
 func validSchemas(p profile) bool {
-	return p.OperationResultSchema == compat.OperationResultSchemaV0501 &&
-		p.ShellSettingSchema == compat.ShellSettingSchemaV0501
+	return p.OperationResultSchema == compat.OperationResultSchema &&
+		p.ShellSettingSchema == compat.ShellSettingSchema
 }
 
 func validateVersions(qualified profile) error {

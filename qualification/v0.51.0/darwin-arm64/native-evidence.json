@@ -1,0 +1,54 @@
+{
+  "candidate_commit": "f00ac12e89f68e3098530c6e674b8d4a52217196",
+  "core_commit": "77f2b2dd8770c2d54cae9cf34c10b1c18dbb0993",
+  "provider_version": "v1.0.0",
+  "hosts": [
+    {
+      "host": "darwin/arm64",
+      "client_version": "v0.51.0",
+      "client_revision": "7d55286de0c775148b985ed349f760f1eba06203",
+      "daemon_version": "v0.51.0",
+      "daemon_schema": "v0.51.0/server-running",
+      "operation_result_schema": "action-resource-name",
+      "shell_setting_schema": "effective-shell-setting",
+      "disk_sizing_schema": "darwin-arm64/3-percent-overhead",
+      "docker_server_version": "29.9.3",
+      "buildx_version": "v0.38.2",
+      "compose_version": "5.7.0",
+      "host_os_version": "darwin 25.6.0",
+      "provider_commit": "f00ac12e89f68e3098530c6e674b8d4a52217196",
+      "fixture_provenance_sha256": "e9626f246caa6d3a3352de28dc31a9ab0a447a09837735ae6b9162864c623d88",
+      "gates": {
+        "byte_stream": "passed",
+        "cancellation": "passed",
+        "client_and_daemon": "passed",
+        "concurrency_crash": "passed",
+        "daemon_ownership": "passed",
+        "detached_lifetime": "passed",
+        "devsy_workflow": "passed",
+        "docker_capabilities": "passed",
+        "filesystem": "passed",
+        "inventory": "passed",
+        "mountless": "passed",
+        "native_install": "passed",
+        "network": "passed",
+        "ownership": "passed",
+        "settings_authority": "passed",
+        "sizing": "passed"
+      },
+      "local_run": {
+        "kind": "local",
+        "log_sha256": "08f6a6af57d48295bdc76a2d05bb12771530e99338d8f8c20b8620b32f0fcc0d",
+        "started_at": "2026-11-09T16:22:42Z",
+        "ended_at": "2026-11-09T16:37:38Z",
+        "host_sha256": "d68ff6b853a5ba9f0ad4bc4fb3e7f55c6fcee114898c0a42c8369dfaaeca599e",
+        "selection": "^TestNative",
+        "tests": [
+          "TestNativeProviderCrash",
+          "TestNativeProviderInstallation",
+          "TestNativeWorkspace"
+        ]
+      }
+    }
+  ]
+}

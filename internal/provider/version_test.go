@@ -114,8 +114,8 @@ func versionProfile(t *testing.T, qualified bool) compat.Profile {
 			testUnitRunning: stateRunning,
 			testUnitStopped: stateStopped,
 		},
-		OperationResultSchema: compat.OperationResultSchemaV0501,
-		ShellSettingSchema:    compat.ShellSettingSchemaV0501,
+		OperationResultSchema: compat.OperationResultSchema,
+		ShellSettingSchema:    compat.ShellSettingSchema,
 		MinimumDevsyVersion:   "1.2.3",
 	}
 	if qualified {

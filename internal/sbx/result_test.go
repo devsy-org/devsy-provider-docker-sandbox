@@ -12,7 +12,7 @@ func TestObservedOperationResults(t *testing.T) {
 		file, action string
 	}{
 		{"stop-result.json", testStopped},
-		{"rm-result.json", "removed"},
+		{"rm-result.json", testRemoved},
 	} {
 		t.Run(tc.action, func(t *testing.T) {
 			if err := CheckResult(
@@ -34,7 +34,7 @@ func TestCheckResult(t *testing.T) {
 		wantError                  bool
 	}{
 		{"wrong name", stopped, "other", testStopped, true},
-		{"wrong action", stopped, testOwned, "removed", true},
+		{"wrong action", stopped, testOwned, testRemoved, true},
 		{"wrong resource", `[{"action":"stopped","resource":"workspace","name":"owned"}]`, testOwned, testStopped, true},
 		{"extra target", `[{"action":"stopped","resource":"sandbox","name":"owned"},{"actio` +
 			`n":"stopped","resource":"sandbox","name":"other"}]`, testOwned, testStopped, true},
