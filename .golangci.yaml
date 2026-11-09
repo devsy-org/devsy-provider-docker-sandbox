@@ -33,6 +33,10 @@ linters:
     - whitespace
   exclusions:
     rules:
+      - path: '^cmd/qualify-native/source\.go$'
+        linters:
+          - gosec
+        text: 'G204'
       - path: '^internal/sbx/client(_test)?\.go$'
         linters:
           - gosec

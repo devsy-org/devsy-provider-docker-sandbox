@@ -24,6 +24,7 @@ Running the provider against real sandboxes needs the standalone `sbx` executabl
 - **Run unit tests**: `mise run test` runs `go test -race ./...` and `go vet ./...`.
 - **Build development binary**: `mise run build` writes `dist/devsy-provider-docker-sandbox`.
 - **Run all hooks**: `mise run pre-commit` runs every prek hook on all files.
+- **Qualify**: `mise run qualify:native` runs the native suite on this host and writes local qualification evidence. See Native Tests.
 - **Package**: `RELEASE_TAG=<tag> mise run package` generates the checksum-pinned manifest from executables already placed in `dist`. It requires executables for linux/amd64, linux/arm64, darwin/arm64 and windows/amd64. It requires measured disk sizing evidence for every host listed in `qualified_hosts` and rejects evidence for a host that is not listed.
 
 ---
@@ -38,15 +39,21 @@ Running the provider against real sandboxes needs the standalone `sbx` executabl
 
 Native tests are in `integration/` and carry the `native` build tag. They drive real Devsy workspaces on a real `sbx` microVM. A successful build, a unit test run or a client only `sbx version` is not native qualification.
 
-Release qualification runs the native tests through the `Native VM qualification` workflow (`.github/workflows/e2e.yml`), which `release.yml` calls. Contributors can also run them on a suitable local host before merge. The tests need working virtualization and an authenticated `sbx`. The workflow takes runner labels from the repository variables `SBX_NATIVE_RUNNER_MACOS_ARM64`, `SBX_NATIVE_RUNNER_WINDOWS_AMD64`, `SBX_NATIVE_RUNNER_LINUX_AMD64` and `SBX_NATIVE_RUNNER_LINUX_ARM64`. Each variable holds a JSON value that becomes `runs-on`, for example `["self-hosted","macOS","ARM64"]`. A plain label fails the planning step. The `sbx` path comes from `SBX_NATIVE_EXECUTABLE`. The only qualified host today is darwin/arm64, so the macOS arm64 runner is the one that is needed. The repository does not state whether a GitHub-hosted runner can run `sbx`. Use a runner registered under the variable above.
+Native qualification is local by design. GitHub hosted runners cannot run `sbx`, which needs virtualization, and the project registers no self-hosted runner. The maintainer runs the suite on an Apple Silicon Mac and provides reviewed evidence to the release workflow. Release notes say that hosts are qualified locally by the maintainer, not by CI.
 
-The workflow builds the Devsy core at the pinned commit, builds `integration/native_cancel.go` as a helper, then runs:
+Run it before each release and whenever a new `sbx` version lands. Check out the candidate commit with a clean tree, then run:
 
 ```bash
-go test -tags=native ./integration -run '^TestNative' -count=1 -v -timeout=75m
+SBX_PATH=<qualified sbx> CANDIDATE_COMMIT=<sha> CORE_REF=<core sha> CORE_TAG=<core tag> RELEASE_TAG=<provider tag> SBX_NATIVE_DENIED_URL=<denied url> mise run qualify:native
 ```
 
-The tests read these environment variables: `DEVSY_NATIVE_CORE_BIN`, `DEVSY_NATIVE_CORE_SOURCE`, `DEVSY_NATIVE_RELEASE_DIR`, `DEVSY_NATIVE_VERSION`, `DEVSY_NATIVE_CANCEL_HELPER`, `SBX_PATH` and `SBX_NATIVE_DENIED_URL`. A test that needs one of them fails when it is missing.
+The task checks the tree and `sbx` with `go run ./cmd/qualify-native preflight`, builds the pinned Devsy core and the cancel helper, cross compiles the four provider executables, packages them and runs `go test -tags=native ./integration -run '^TestNative' -count=1 -v -timeout=75m`. It tees the full log, then `go run ./cmd/qualify-native write` writes `dist/native-qualification/<candidate>/native-evidence.json`. The writer refuses when any native test failed or was skipped, when the tree is dirty, when HEAD is not the candidate commit, when the host is not in `qualified_hosts`, or when the `sbx` client, revision or daemon does not match `internal/compat/profile.json` before or after the run. Each host entry carries a `local_run` record with the SHA-256 of the log, the start and end times and a hash of the host name. Keep the log with the evidence.
+
+To prove the pipeline without the full suite, set `QUALIFY_TEST_OUTPUT_SELECTION` to a narrower `-run` pattern. The writer then labels the file `native-evidence.test-output.json`, sets `local_run.kind` to `local-test-output` and marks every gate `not_run`. `verify` always rejects such a file, so it can never be stored as `SBX_NATIVE_EVIDENCE`. The writer takes the qualified `sbx` client, revision and daemon from `internal/compat/profile.json`, so qualifying a new `sbx` version means updating the profile and fixtures first, then running the task.
+
+Review the evidence, then store the file content in the `SBX_NATIVE_EVIDENCE` repository variable. The `evidence` job in `.github/workflows/e2e.yml` checks it with `go run ./cmd/qualify-native verify` and runs only inside a release dispatch, so ordinary pull requests never need evidence. It uses the protected `native-sandbox-qualification` environment as the approval step. The local build is a cross compile of the same sources, so it is not byte compared with the CI artifact.
+
+The tests read these environment variables, which `qualify:native` sets: `DEVSY_NATIVE_CORE_BIN`, `DEVSY_NATIVE_CORE_SOURCE`, `DEVSY_NATIVE_RELEASE_DIR`, `DEVSY_NATIVE_VERSION`, `DEVSY_NATIVE_CANCEL_HELPER`, `SBX_PATH` and `SBX_NATIVE_DENIED_URL`. A test that needs one of them fails when it is missing. The workspace test logs the guest Docker, buildx and Compose versions on a `native-evidence` line that the writer reads.
 
 The `concurrency_crash` evidence needs concurrent guest sessions and `TestNativeProviderCrash`. The test builds the provider, records a real `sbx` start, observes the contender's main goroutine waiting with the mutation lock held by the first provider, and kills the first provider. The contender must then finish without changing the interrupted journal. Recovery must mark uncertainty, settle the backend, restore readiness and verify deletion against inventory. Unit tests do not replace this evidence.
 
@@ -142,8 +149,8 @@ Release Please runs with `skip-github-release`, so it opens release pull request
 
 1. After the release pull request merges, an operator creates a signed tag on the merged release commit. The tag version must match `.release-please-manifest.json`.
 2. Remove the `autorelease: pending` label from the release pull request and add `autorelease: tagged`, so Release Please can continue opening release pull requests.
-3. Dispatch the `Qualified provider release` workflow (`release.yml`) from the tag ref. Inputs: `version` (the tag), `core_ref` (the commit SHA of a released compatible Devsy core) and `core_tag` (that core release tag). The workflow checks the signed tag and commit, then builds and tests all four hosts, installs the provider with the pinned core, and runs the native VM jobs for every host in `qualified_hosts`.
-4. The first dispatch has no reviewed evidence, so its `evidence` job fails before publication. Review the native VM job results, then record the evidence JSON in the `SBX_NATIVE_EVIDENCE` repository variable. Each host entry links a job of a `release.yml` dispatch run on the same commit.
-5. Dispatch the workflow a second time with the same inputs. The `evidence` job validates `SBX_NATIVE_EVIDENCE` against the profile and the recorded runs. The `publish` job then waits for approval in the protected `provider-release` environment and creates the release.
+3. Run `mise run qualify:native` on the maintainer Mac at the tagged commit (see Native Tests) and review the evidence file.
+4. Store the evidence in the `SBX_NATIVE_EVIDENCE` repository variable.
+5. Dispatch the `Qualified provider release` workflow (`release.yml`) from the tag ref. Inputs: `version` (the tag), `core_ref` (the commit SHA of a released compatible Devsy core) and `core_tag` (that core release tag). The workflow checks the signed tag and commit, builds and tests all four hosts, installs the provider with the pinned core and validates the evidence against the profile. The `publish` job then waits for approval in the protected `provider-release` environment and creates the release.
 
 The release publishes all four hosts. Release notes and the README must list which hosts are natively qualified and which are built and unit tested only.

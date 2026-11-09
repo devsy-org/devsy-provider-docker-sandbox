@@ -125,6 +125,7 @@ func TestNativeWorkspace(t *testing.T) {
 		before := sandboxNames(t, h.ctx, sbx)
 		id := h.createWorkspace(t, "network")
 		created := newSandboxName(t, before, sandboxNames(t, h.ctx, sbx))
+		logGuestDockerVersions(t, h.ctx, sbx, created)
 		assertGuest(t, h, id, "test -s /tmp/devsy-sandbox-allowed-https")
 		assertGuest(
 			t,
@@ -170,6 +171,29 @@ func TestNativeWorkspace(t *testing.T) {
 			t.Fatalf("sbx policy does not allow the build destination: %+v", decision)
 		}
 	})
+}
+
+func logGuestDockerVersions(t *testing.T, ctx context.Context, sbx, sandbox string) {
+	t.Helper()
+	guest := func(script string) string {
+		output, err := exec.CommandContext(
+			ctx, sbx, "exec", "--user", "root", sandbox, "--", "sh", "-c", script,
+		).Output()
+		if err != nil {
+			t.Fatalf("guest %q failed: %v", script, err)
+		}
+		return strings.TrimSpace(string(output))
+	}
+	buildx := strings.Fields(guest("docker buildx version"))
+	if len(buildx) < 2 {
+		t.Fatalf("unreadable guest buildx version: %q", buildx)
+	}
+	t.Logf(
+		"native-evidence docker_server_version=%s buildx_version=%s compose_version=%s",
+		guest("docker version --format '{{.Server.Version}}'"),
+		buildx[1],
+		guest("docker compose version --short"),
+	)
 }
 
 type networkDecision struct {

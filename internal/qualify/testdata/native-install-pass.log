@@ -1,0 +1,4 @@
+=== RUN   TestNativeProviderInstallation
+--- PASS: TestNativeProviderInstallation (30.41s)
+PASS
+ok  	github.com/devsy-org/devsy-provider-docker-sandbox/integration	30.729s
