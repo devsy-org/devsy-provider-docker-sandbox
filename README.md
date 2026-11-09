@@ -25,6 +25,8 @@ devsy provider init docker-sandbox
 
 Natively qualified: darwin/arm64. Built and unit tested: linux/amd64, linux/arm64, windows/amd64. Unqualified hosts run with a warning in builds from `main`. The v0.1.1 release supports only darwin/arm64 and `sbx` v0.50.1.
 
+Qualification is local by design. GitHub hosted runners cannot run `sbx`, so the maintainer runs `mise run qualify:native` on an Apple Silicon Mac before each release and whenever a new `sbx` version lands. The release notes name each qualified host and give the hash of its test log. Hosts are qualified locally by the maintainer, not by CI.
+
 Customer documentation: [Docker Sandboxes provider](https://devsy.sh/docs/managing-providers/docker-sandbox).
 
 Contributors: [AGENTS.md](AGENTS.md).

@@ -8,105 +8,10 @@ on:
       core_ref:
         required: true
         type: string
-      core_tag:
-        required: true
-        type: string
 permissions:
   contents: read
-  actions: read
 jobs:
-  plan:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      hosts: ${{ steps.matrix.outputs.hosts }}
-    env:
-      MACOS_RUNNER: ${{ vars.SBX_NATIVE_RUNNER_MACOS_ARM64 }}
-      WINDOWS_RUNNER: ${{ vars.SBX_NATIVE_RUNNER_WINDOWS_AMD64 }}
-      LINUX_AMD64_RUNNER: ${{ vars.SBX_NATIVE_RUNNER_LINUX_AMD64 }}
-      LINUX_ARM64_RUNNER: ${{ vars.SBX_NATIVE_RUNNER_LINUX_ARM64 }}
-      CORE_REF: ${{ inputs.core_ref }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          persist-credentials: false
-      - id: matrix
-        shell: bash
-        run: |
-          [[ "$CORE_REF" =~ ^[0-9a-f]{40}$ ]] || { echo 'Pin the qualified core commit SHA.' >&2; exit 1; }
-          hosts="$(jq -ce --arg mac "$MACOS_RUNNER" --arg win "$WINDOWS_RUNNER" --arg amd "$LINUX_AMD64_RUNNER" --arg arm "$LINUX_ARM64_RUNNER" '
-            [.qualified_hosts[] | . as $host | {host:$host, runner:(if $host == "darwin/arm64" then $mac elif $host == "windows/amd64" then $win elif $host == "linux/amd64" then $amd elif $host == "linux/arm64" then $arm else error("unsupported host") end | if . == "" then error("native runner not configured for " + $host) else fromjson end)}]
-            | if length == 0 then error("no qualified hosts") else . end
-          ' internal/compat/profile.json)"
-          echo "hosts=$hosts" >> "$GITHUB_OUTPUT"
-  vm:
-    name: Native VM ${{ matrix.host.host }}
-    needs: plan
-    environment: native-sandbox-qualification
-    runs-on: ${{ matrix.host.runner }}
-    timeout-minutes: 90
-    strategy:
-      fail-fast: false
-      matrix:
-        host: ${{ fromJSON(needs.plan.outputs.hosts) }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          path: provider
-          persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          repository: devsy-org/devsy
-          ref: ${{ inputs.core_ref }}
-          path: devsy
-          persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
-        with:
-          go-version-file: provider/go.mod
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
-        with:
-          name: provider-release
-          path: dist
-      - name: Require native host, usable virtualization and authenticated sbx
-        shell: bash
-        env:
-          TARGET_HOST: ${{ matrix.host.host }}
-          SBX_PATH: ${{ vars.SBX_NATIVE_EXECUTABLE }}
-        run: |
-          test "$(go env GOOS)/$(go env GOARCH)" = "$TARGET_HOST"
-          test -n "$SBX_PATH"
-          case "$TARGET_HOST" in
-            linux/*) test -r /dev/kvm; test -w /dev/kvm; . /etc/os-release; test "$ID" = ubuntu; test "${VERSION_ID%%.*}" -ge 24 ;;
-            darwin/*) test "$(sw_vers -productVersion | cut -d. -f1)" -ge 14; test "$(sysctl -n kern.hv_support)" = 1 ;;
-            windows/*) powershell.exe -NoProfile -Command 'if ((Get-WindowsOptionalFeature -Online -FeatureName HypervisorPlatform).State -ne "Enabled") { exit 1 }' ;;
-          esac
-          "$SBX_PATH" version --format json
-          "$SBX_PATH" ls --format json
-      - name: Build pinned compatible Devsy core
-        working-directory: devsy
-        shell: bash
-        env:
-          CORE_TAG: ${{ inputs.core_tag }}
-        run: |
-          [[ "$CORE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$ ]]
-          go build -ldflags "-X github.com/devsy-org/devsy/pkg/version.version=$CORE_TAG" -o "$RUNNER_TEMP/devsy${{ runner.os == 'Windows' && '.exe' || '' }}" .
-          test "$("$RUNNER_TEMP/devsy${{ runner.os == 'Windows' && '.exe' || '' }}" --version)" = "$CORE_TAG"
-          go build -o "$RUNNER_TEMP/native-cancel${{ runner.os == 'Windows' && '.exe' || '' }}" ../provider/integration/native_cancel.go
-      - name: Exercise real Devsy workspaces and streams
-        working-directory: provider
-        shell: bash
-        env:
-          DEVSY_NATIVE_VERSION: ${{ inputs.version }}
-          DEVSY_NATIVE_RELEASE_DIR: ${{ github.workspace }}/dist
-          DEVSY_NATIVE_CORE_SOURCE: ${{ github.workspace }}/devsy
-          SBX_PATH: ${{ vars.SBX_NATIVE_EXECUTABLE }}
-          SBX_NATIVE_DENIED_URL: ${{ vars.SBX_NATIVE_DENIED_URL }}
-        run: |
-          export DEVSY_NATIVE_CORE_BIN="$RUNNER_TEMP/devsy${{ runner.os == 'Windows' && '.exe' || '' }}"
-          export DEVSY_NATIVE_CANCEL_HELPER="$RUNNER_TEMP/native-cancel${{ runner.os == 'Windows' && '.exe' || '' }}"
-          go test -tags=native ./integration -run '^TestNative' -count=1 -v -timeout=75m
   evidence:
-    needs: [plan, vm]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: native-sandbox-qualification
@@ -115,31 +20,19 @@ jobs:
       CORE_REF: ${{ inputs.core_ref }}
       VERSION: ${{ inputs.version }}
       NATIVE_EVIDENCE: ${{ vars.SBX_NATIVE_EVIDENCE }}
-      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - name: Require reviewed native evidence for every qualified tuple
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+      - name: Require reviewed local native evidence for every qualified tuple
         shell: bash
         run: |
-          test -n "$NATIVE_EVIDENCE" || { echo 'Reviewed native qualification evidence for the qualified hosts is absent; publication is blocked.' >&2; exit 1; }
-          jq -e --arg candidate "$CANDIDATE" --arg core "$CORE_REF" --arg version "$VERSION" --slurpfile profile internal/compat/profile.json '
-            .candidate_commit == $candidate and .core_commit == $core and .provider_version == $version and
-            ([.hosts[].host] | sort) == ($profile[0].qualified_hosts | sort) and
-            (all(.hosts[]; (.ci_run_url | test("^https://github.com/devsy-org/devsy-provider-docker-sandbox/actions/runs/[0-9]+/job/[0-9]+$")) and
-              (.provider_commit == $candidate) and (.host_os_version | length > 0) and
-              (.client_version as $client | ($profile[0].qualified_sbx_versions | index($client)) != null) and
-              (.client_version as $client | .client_revision == $profile[0].qualified_sbx_revisions[$client]) and
-              (.daemon_version | length > 0) and
-              (.client_version as $client | .daemon_version as $daemon | ($profile[0].qualified_daemon_versions[$client] | index($daemon)) != null) and
-              (.daemon_schema == $profile[0].daemon_schema) and
-              (.operation_result_schema == $profile[0].operation_result_schema) and
-              (.shell_setting_schema == $profile[0].shell_setting_schema) and
-              (.disk_sizing_schema | length > 0) and (.disk_sizing_schema == $profile[0].disk_sizing_schemas[.host]) and
-              (.docker_server_version | length > 0) and (.buildx_version | length > 0) and (.compose_version | length > 0) and
-              ([.gates.client_and_daemon, .gates.inventory, .gates.ownership, .gates.mountless, .gates.detached_lifetime, .gates.byte_stream, .gates.cancellation, .gates.filesystem, .gates.docker_capabilities, .gates.daemon_ownership, .gates.network, .gates.devsy_workflow, .gates.settings_authority, .gates.sizing, .gates.concurrency_crash, .gates.native_install] | all(.[]; . == "passed"))))
-          ' <<< "$NATIVE_EVIDENCE"
+          test -n "$NATIVE_EVIDENCE" || { echo 'Reviewed native qualification evidence for the qualified hosts is absent; publication is blocked. Run mise run qualify:native on the maintainer Mac and record the result in SBX_NATIVE_EVIDENCE.' >&2; exit 1; }
+          printf '%s\n' "$NATIVE_EVIDENCE" > "$RUNNER_TEMP/native-evidence.json"
+          go run ./cmd/qualify-native verify --evidence "$RUNNER_TEMP/native-evidence.json" --candidate "$CANDIDATE" --core-ref "$CORE_REF" --version "$VERSION"
           jq -r '.hosts[] | [.client_version, .fixture_provenance_sha256] | @tsv' <<< "$NATIVE_EVIDENCE" | while IFS=$'\t' read -r client_version fingerprint; do
             [[ "$client_version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
             [[ "$fingerprint" =~ ^[0-9a-f]{64}$ ]]
@@ -156,25 +49,6 @@ jobs:
               test "$captured" = "$expected"
             done
           done
-          jq -r '.hosts[] | [.host, .ci_run_url] | @tsv' <<< "$NATIVE_EVIDENCE" | while IFS=$'\t' read -r host url; do
-            [[ "$url" =~ ^https://github.com/devsy-org/devsy-provider-docker-sandbox/actions/runs/([0-9]+)/job/([0-9]+)$ ]]
-            run_id="${BASH_REMATCH[1]}"
-            job_id="${BASH_REMATCH[2]}"
-            run="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id")"
-            job="$(gh api "repos/$GITHUB_REPOSITORY/actions/jobs/$job_id")"
-            test "$(jq -r '.head_sha // empty' <<< "$run")" = "$CANDIDATE"
-            test "$(jq -r '.path // empty' <<< "$run")" = ".github/workflows/release.yml"
-            test "$(jq -r '.event // empty' <<< "$run")" = workflow_dispatch
-            workflow_id="$(jq -r '.workflow_id // empty' <<< "$run")"
-            test -n "$workflow_id"
-            workflow="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow_id")"
-            test "$(jq -r '.path // empty' <<< "$workflow")" = ".github/workflows/release.yml"
-            test "$(jq -r '.run_id // empty' <<< "$job")" = "$run_id"
-            jq -e --arg host "$host" '.name | endswith("Native VM " + $host)' <<< "$job" >/dev/null
-            test "$(jq -r '.conclusion // empty' <<< "$job")" = success
-            jq -e 'all(.steps[]; .conclusion == "success") and any(.steps[]; .name == "Require native host, usable virtualization and authenticated sbx" and .conclusion == "success") and any(.steps[]; .name == "Exercise real Devsy workspaces and streams" and .conclusion == "success")' <<< "$job" >/dev/null
-          done
-          printf '%s\n' "$NATIVE_EVIDENCE" > "$RUNNER_TEMP/native-evidence.json"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: qualified-native-evidence

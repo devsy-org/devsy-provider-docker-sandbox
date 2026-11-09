@@ -16,7 +16,6 @@ on:
         type: string
 permissions:
   contents: read
-  actions: read
 jobs:
   source:
     runs-on: ubuntu-latest
@@ -66,7 +65,6 @@ jobs:
     with:
       version: ${{ inputs.version }}
       core_ref: ${{ inputs.core_ref }}
-      core_tag: ${{ inputs.core_tag }}
   publish:
     needs: [distribution, qualification]
     runs-on: ubuntu-latest
@@ -106,8 +104,8 @@ jobs:
           {
             printf 'Docker Sandboxes provider %s\n\n' "$VERSION"
             printf 'Required Devsy core release: %s (%s)\n\n' "$CORE_TAG" "$CORE_REF"
-            printf 'Natively qualified hosts, with native VM evidence for this candidate:\n'
-            jq -r '.hosts[] | "- \(.host): sbx client \(.client_version), daemon \(.daemon_version), evidence \(.ci_run_url)"' "$EVIDENCE_FILE"
+            printf 'Natively qualified hosts. The maintainer qualified each one locally on a real VM, not in CI. Each line gives the SHA-256 of the captured native test log:\n'
+            jq -r '.hosts[] | "- \(.host): sbx client \(.client_version), daemon \(.daemon_version), qualified locally by the maintainer, log sha256 \(.local_run.log_sha256)"' "$EVIDENCE_FILE"
             printf '\nBuilt and unit-tested only, with no native qualification evidence. These hosts run with a warning:\n'
             jq -r '["linux/amd64", "linux/arm64", "darwin/arm64", "windows/amd64"] - .qualified_hosts | .[] | "- " + .' internal/compat/profile.json
             printf '\nThe manifest includes all four hosts. Install sbx and sign in separately. Deleting a default workspace machine removes all guest data, including named volumes.\n'

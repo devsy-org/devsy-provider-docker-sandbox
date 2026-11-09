@@ -61,3 +61,45 @@ run = 'go run ./cmd/package-provider "$RELEASE_TAG" dist internal/compat/profile
 [tasks.pre-commit]
 description = "Run all prek hooks"
 run = "prek run --all-files"
+
+[tasks."qualify:native"]
+description = "Run the native suite on this host and write local qualification evidence"
+shell = "bash -c"
+run = '''
+set -euo pipefail
+selection="${QUALIFY_TEST_OUTPUT_SELECTION:-^TestNative}"
+: "${SBX_PATH:?}" "${CANDIDATE_COMMIT:?}" "${CORE_REF:?}" "${CORE_TAG:?}" "${RELEASE_TAG:?}" "${SBX_NATIVE_DENIED_URL:?}"
+root="$PWD"
+work="$root/dist/native-qualification/$CANDIDATE_COMMIT"
+mkdir -p "$work/release"
+go run ./cmd/qualify-native preflight --candidate "$CANDIDATE_COMMIT" --sbx "$SBX_PATH"
+"$SBX_PATH" version --format json > "$work/sbx-before.json"
+core="$work/core-src"
+if [ ! -d "$core/.git" ]; then git clone --quiet https://github.com/devsy-org/devsy "$core"; fi
+git -C "$core" fetch --quiet origin "$CORE_REF"
+git -C "$core" checkout --quiet --detach "$CORE_REF"
+test "$(git -C "$core" rev-parse HEAD)" = "$CORE_REF"
+(cd "$core" && go build -ldflags "-X github.com/devsy-org/devsy/pkg/version.version=$CORE_TAG" -o "$work/devsy" .)
+test "$("$work/devsy" --version)" = "$CORE_TAG"
+(cd "$core" && go build -o "$work/native-cancel" "$root/integration/native_cancel.go")
+for target in linux/amd64 linux/arm64 darwin/arm64 windows/amd64; do
+  suffix=""
+  if [ "${target%/*}" = windows ]; then suffix=".exe"; fi
+  GOOS="${target%/*}" GOARCH="${target#*/}" go build -trimpath -ldflags "-X main.version=$RELEASE_TAG" \
+    -o "$work/release/devsy-provider-docker-sandbox-${target%/*}-${target#*/}$suffix" ./cmd/devsy-provider-docker-sandbox
+done
+go run ./cmd/package-provider "$RELEASE_TAG" "$work/release" internal/compat/profile.json
+out="$work/native-evidence.json"
+if [ "$selection" != "^TestNative" ]; then out="$work/native-evidence.test-output.json"; fi
+log="$work/native-$(go env GOOS)-$(go env GOARCH).log"
+started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+status=0
+DEVSY_NATIVE_VERSION="$RELEASE_TAG" DEVSY_NATIVE_RELEASE_DIR="$work/release" DEVSY_NATIVE_CORE_SOURCE="$core" \
+  DEVSY_NATIVE_CORE_BIN="$work/devsy" DEVSY_NATIVE_CANCEL_HELPER="$work/native-cancel" \
+  go test -tags=native ./integration -run "$selection" -count=1 -v -timeout=75m 2>&1 | tee "$log" || status="${PIPESTATUS[0]}"
+ended="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+go run ./cmd/qualify-native write --candidate "$CANDIDATE_COMMIT" --core-ref "$CORE_REF" --version "$RELEASE_TAG" \
+  --sbx "$SBX_PATH" --sbx-before "$work/sbx-before.json" --log "$log" --exit-code "$status" \
+  --started "$started" --ended "$ended" --selection "$selection" --out "$out"
+echo "$out"
+'''

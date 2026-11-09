@@ -1,0 +1,6 @@
+=== RUN   TestNativeWorkspace
+    workspace_test.go:31: native prerequisite DEVSY_NATIVE_CORE_BIN is not configured
+--- FAIL: TestNativeWorkspace (0.00s)
+FAIL
+FAIL	github.com/devsy-org/devsy-provider-docker-sandbox/integration	0.380s
+FAIL
