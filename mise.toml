@@ -79,6 +79,7 @@ if [ ! -d "$core/.git" ]; then git clone --quiet https://github.com/devsy-org/de
 git -C "$core" fetch --quiet origin "$CORE_REF"
 git -C "$core" checkout --quiet --detach "$CORE_REF"
 test "$(git -C "$core" rev-parse HEAD)" = "$CORE_REF"
+test -z "$(git -C "$core" status --porcelain --untracked-files=all)"
 (cd "$core" && go build -ldflags "-X github.com/devsy-org/devsy/pkg/version.version=$CORE_TAG" -o "$work/devsy" .)
 test "$("$work/devsy" --version)" = "$CORE_TAG"
 (cd "$core" && go build -o "$work/native-cancel" "$root/integration/native_cancel.go")
