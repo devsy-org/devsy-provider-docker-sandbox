@@ -1,0 +1,39 @@
+=== RUN   TestNativeProviderCrash
+    crash_test.go:39: provider B observed waiting at mutation lock held by provider A
+    crash_test.go:39: hard-killed provider during start: signal: killed
+    crash_test.go:39: provider B acquired lock after SIGKILL; journal unchanged
+    crash_test.go:40: journal marks interrupted start uncertain
+    crash_test.go:41: recover settled operation; explicit start and status confirm Running
+    crash_test.go:60: delete verified absent in real sbx inventory; deleted journal retains owned ID
+--- PASS: TestNativeProviderCrash (20.93s)
+=== RUN   TestNativeProviderInstallation
+--- PASS: TestNativeProviderInstallation (14.13s)
+=== RUN   TestNativeWorkspace
+=== RUN   TestNativeWorkspace/image_hooks_and_source_persistence
+=== RUN   TestNativeWorkspace/stream_transport
+=== RUN   TestNativeWorkspace/stream_transport/binary_echo_and_input_EOF
+=== RUN   TestNativeWorkspace/stream_transport/simultaneous_backpressure
+=== RUN   TestNativeWorkspace/stream_transport/independent_stderr
+=== RUN   TestNativeWorkspace/stream_transport/guest_exit_codes
+=== RUN   TestNativeWorkspace/stream_transport/concurrent_sessions
+=== RUN   TestNativeWorkspace/stream_transport/cancel_admitted_guest_process_without_stopping_another_session
+=== RUN   TestNativeWorkspace/Dockerfile_and_Feature
+=== RUN   TestNativeWorkspace/Compose_and_volume
+=== RUN   TestNativeWorkspace/bash_zsh_and_fish_shells
+=== RUN   TestNativeWorkspace/allowed_build_and_denied_runtime_network
+    workspace_test.go:128: native-evidence docker_server_version=29.9.3 buildx_version=v0.38.2 compose_version=5.7.0
+--- PASS: TestNativeWorkspace (858.82s)
+    --- PASS: TestNativeWorkspace/image_hooks_and_source_persistence (90.23s)
+    --- PASS: TestNativeWorkspace/stream_transport (175.70s)
+        --- PASS: TestNativeWorkspace/stream_transport/binary_echo_and_input_EOF (22.78s)
+        --- PASS: TestNativeWorkspace/stream_transport/simultaneous_backpressure (24.88s)
+        --- PASS: TestNativeWorkspace/stream_transport/independent_stderr (24.76s)
+        --- PASS: TestNativeWorkspace/stream_transport/guest_exit_codes (66.05s)
+        --- PASS: TestNativeWorkspace/stream_transport/concurrent_sessions (14.63s)
+        --- PASS: TestNativeWorkspace/stream_transport/cancel_admitted_guest_process_without_stopping_another_session (22.60s)
+    --- PASS: TestNativeWorkspace/Dockerfile_and_Feature (210.05s)
+    --- PASS: TestNativeWorkspace/Compose_and_volume (83.66s)
+    --- PASS: TestNativeWorkspace/bash_zsh_and_fish_shells (95.77s)
+    --- PASS: TestNativeWorkspace/allowed_build_and_denied_runtime_network (74.47s)
+PASS
+ok  	github.com/devsy-org/devsy-provider-docker-sandbox/integration	894.201s
