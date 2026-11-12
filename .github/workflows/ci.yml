@@ -96,6 +96,10 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+    outputs:
+      created: ${{ steps.release.outputs.release_created }}
+      tag: ${{ steps.release.outputs.tag_name }}
+      sha: ${{ steps.release.outputs.sha }}
     concurrency:
       group: release-please
       cancel-in-progress: false
@@ -111,7 +115,6 @@ jobs:
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7
         id: release
         with:
-          skip-github-release: true
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
           token: ${{ steps.app-token.outputs.token }}
@@ -137,3 +140,12 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           GH_REPO: ${{ github.repository }}
           RELEASE_PRS: ${{ steps.release.outputs.prs }}
+  release-assets:
+    if: needs.release-please.outputs.created == 'true'
+    needs: release-please
+    uses: ./.github/workflows/release.yml
+    permissions:
+      contents: write
+    with:
+      tag: ${{ needs.release-please.outputs.tag }}
+      expected_sha: ${{ needs.release-please.outputs.sha }}

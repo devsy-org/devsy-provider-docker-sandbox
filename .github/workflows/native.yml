@@ -8,6 +8,9 @@ on:
       core_ref:
         required: true
         type: string
+      ref:
+        required: false
+        type: string
 permissions:
   contents: read
 jobs:
@@ -25,6 +28,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          ref: ${{ inputs.ref || github.sha }}
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
         with:
@@ -46,7 +50,7 @@ jobs:
           test "$("./dist/$name" version)" = "$VERSION"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: executable-${{ matrix.host.os }}-${{ matrix.host.arch }}
+          name: executable-${{ inputs.version }}-${{ matrix.host.os }}-${{ matrix.host.arch }}
           path: dist/*
           if-no-files-found: error
   manifest:
@@ -57,13 +61,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           path: provider
+          ref: ${{ inputs.ref || github.sha }}
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
         with:
           go-version-file: provider/go.mod
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
-          pattern: executable-*
+          pattern: executable-${{ inputs.version }}-*
           path: dist
           merge-multiple: true
       - name: Generate and verify release bytes
@@ -76,7 +81,7 @@ jobs:
           sha256sum --check checksums.txt
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: provider-release
+          name: provider-release-${{ inputs.version }}
           path: dist/*
           if-no-files-found: error
   install:
@@ -101,6 +106,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           path: provider
+          ref: ${{ inputs.ref || github.sha }}
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -113,7 +119,7 @@ jobs:
           go-version-file: devsy/go.mod
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
-          name: provider-release
+          name: provider-release-${{ inputs.version }}
           path: dist
       - name: Verify native Devsy parser, alias, downloader and rejection
         working-directory: devsy

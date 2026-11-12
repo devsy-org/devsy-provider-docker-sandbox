@@ -1,91 +1,120 @@
-name: Qualified provider release
+name: Release assets
 on:
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+      expected_sha:
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
-      version:
-        description: Existing signed release tag
-        required: true
-        type: string
-      core_ref:
-        description: Qualified, released Devsy core commit SHA
-        required: true
-        type: string
-      core_tag:
-        description: Published compatible Devsy core release tag
+      tag:
+        description: Release tag
         required: true
         type: string
 permissions:
   contents: read
+concurrency:
+  group: release-assets
+  cancel-in-progress: false
 jobs:
-  source:
+  resolve:
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+      core_ref: ${{ steps.core.outputs.ref }}
+      core_tag: ${{ steps.core.outputs.tag }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Require verified source tag and signed candidate commit
+      - id: resolve
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ inputs.version }}
-          CORE_REF: ${{ inputs.core_ref }}
-          CORE_TAG: ${{ inputs.core_tag }}
-        shell: bash
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
-          test "$GITHUB_REF" = "refs/tags/$VERSION"
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft | type == "boolean"' | grep -qx true
+          sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/$RELEASE_TAG" --jq .sha)"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
+          if [[ "$EVENT_NAME" != workflow_dispatch ]]; then
+            [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+            test "$sha" = "$EXPECTED_SHA"
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ steps.resolve.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - id: core
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.tag }}
+          RELEASE_SHA: ${{ steps.resolve.outputs.sha }}
+        run: |
+          CORE_TAG="$(jq -er .minimum_devsy_version internal/compat/profile.json)"
           [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          [[ "$CORE_REF" =~ ^[0-9a-f]{40}$ ]]
-          test "$(git rev-parse "refs/tags/$VERSION^{commit}")" = "$GITHUB_SHA"
-          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+          git merge-base --is-ancestor "$RELEASE_SHA" origin/main
           jq -e --arg version "${VERSION#v}" '.["."] == $version' .release-please-manifest.json
-          tag_object="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$VERSION" --jq .object.sha)"
-          test "$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag_object" --jq '.verification.verified')" = true
-          test "$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$GITHUB_SHA" --jq '.verification.verified')" = true
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$RELEASE_SHA" --jq '.verification.verified')" = true
           [[ "$CORE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$ ]]
-          minimum="$(jq -r .minimum_devsy_version internal/compat/profile.json)"
-          printf '%s\n' "${minimum//-/\~}" "${CORE_TAG//-/\~}" | sort -V -C
+          test "$CORE_TAG" = "$(jq -r .minimum_devsy_version internal/compat/profile.json)"
           test "$(gh api "repos/devsy-org/devsy/releases/tags/$CORE_TAG" --jq '.draft == false')" = true
           core_object="$(gh api "repos/devsy-org/devsy/git/ref/tags/$CORE_TAG" --jq .object.sha)"
           core_type="$(gh api "repos/devsy-org/devsy/git/ref/tags/$CORE_TAG" --jq .object.type)"
           if [[ "$core_type" == tag ]]; then
+            core_type="$(gh api "repos/devsy-org/devsy/git/tags/$core_object" --jq .object.type)"
             core_object="$(gh api "repos/devsy-org/devsy/git/tags/$core_object" --jq .object.sha)"
           fi
-          test "$core_object" = "$CORE_REF"
+          test "$core_type" = commit
+          CORE_REF="$core_object"
+          [[ "$CORE_REF" =~ ^[0-9a-f]{40}$ ]]
           test "$(gh api "repos/devsy-org/devsy/git/commits/$CORE_REF" --jq '.verification.verified')" = true
+          echo "ref=$CORE_REF" >> "$GITHUB_OUTPUT"
+          echo "tag=$CORE_TAG" >> "$GITHUB_OUTPUT"
   distribution:
-    needs: source
+    needs: resolve
     uses: ./.github/workflows/distribution.yml
     with:
-      version: ${{ inputs.version }}
-      core_ref: ${{ inputs.core_ref }}
+      version: ${{ inputs.tag }}
+      core_ref: ${{ needs.resolve.outputs.core_ref }}
+      ref: ${{ needs.resolve.outputs.sha }}
   qualification:
-    needs: distribution
+    needs: resolve
     uses: ./.github/workflows/e2e.yml
     with:
-      version: ${{ inputs.version }}
-      core_ref: ${{ inputs.core_ref }}
+      version: ${{ inputs.tag }}
+      core_ref: ${{ needs.resolve.outputs.core_ref }}
+      ref: ${{ needs.resolve.outputs.sha }}
   publish:
-    needs: [distribution, qualification]
+    needs: [resolve, distribution, qualification]
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    environment: provider-release
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          ref: ${{ needs.resolve.outputs.sha }}
           persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
-          name: provider-release
+          name: provider-release-${{ inputs.tag }}
           path: dist
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: qualified-native-evidence
           path: dist
       - name: Verify released manifest and profile
-        shell: bash
         run: |
           test -s dist/provider.yaml
           test -s dist/checksums.txt
@@ -93,11 +122,10 @@ jobs:
           cmp internal/compat/profile.json dist/compatibility-profile.json
           (cd dist && sha256sum --check checksums.txt)
       - name: Produce version-specific release notes
-        shell: bash
         env:
-          VERSION: ${{ inputs.version }}
-          CORE_REF: ${{ inputs.core_ref }}
-          CORE_TAG: ${{ inputs.core_tag }}
+          VERSION: ${{ inputs.tag }}
+          CORE_REF: ${{ needs.resolve.outputs.core_ref }}
+          CORE_TAG: ${{ needs.resolve.outputs.core_tag }}
           EVIDENCE_FILE: dist/native-evidence.json
         run: |
           test -s "$EVIDENCE_FILE"
@@ -111,12 +139,58 @@ jobs:
             printf '\nThe manifest includes all four hosts. Install sbx and sign in separately. Deleting a default workspace machine removes all guest data, including named volumes.\n'
           } > dist/RELEASE_NOTES.txt
       - name: Publish complete release assets
-        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ inputs.version }}
-          CORE_TAG: ${{ inputs.core_tag }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ inputs.tag }}
+          RELEASE_SHA: ${{ needs.resolve.outputs.sha }}
+          CORE_TAG: ${{ needs.resolve.outputs.core_tag }}
         run: |
+          test "$(gh api "repos/$GITHUB_REPOSITORY/commits/$VERSION" --jq .sha)" = "$RELEASE_SHA"
+          verify_assets() {
+            local expected actual
+            expected="$(printf '%s\n' dist/* | sed 's|^dist/||' | LC_ALL=C sort)"
+            actual="$(gh release view "$VERSION" --json assets --jq '.assets[].name' | LC_ALL=C sort)"
+            test "$actual" = "$expected"
+          }
+          draft="$(gh release view "$VERSION" --json isDraft --jq .isDraft)"
+          if [[ "$draft" == false ]]; then
+            verify_assets
+            remote="$(mktemp -d)"
+            trap 'rm -rf "$remote"' EXIT
+            gh release download "$VERSION" --dir "$remote" --pattern '*'
+            for file in dist/*; do cmp "$file" "$remote/$(basename "$file")"; done
+            cp "$remote/provider.yaml" "$remote/provider.yaml.published"
+            cp "$remote/checksums.txt" "$remote/checksums.txt.published"
+            cp "$remote/compatibility-profile.json" "$remote/compatibility-profile.json.published"
+            (cd "$remote" && sha256sum --check checksums.txt)
+            go run ./cmd/package-provider "$VERSION" "$remote" internal/compat/profile.json
+            cmp "$remote/provider.yaml.published" "$remote/provider.yaml"
+            cmp "$remote/checksums.txt.published" "$remote/checksums.txt"
+            cmp "$remote/compatibility-profile.json.published" "$remote/compatibility-profile.json"
+            exit 0
+          fi
+          [[ "$draft" == true ]]
+          gh release upload "$VERSION" dist/* --clobber
+          verify_assets
+          response="$(mktemp)"
+          trap 'rm -f "$response" "$response.err"' EXIT
+          latest=true
+          if gh api "repos/$GITHUB_REPOSITORY/releases/latest" > "$response" 2> "$response.err"; then
+            latest_tag="$(jq -er '.tag_name' "$response")"
+            status="$(gh api "repos/$GITHUB_REPOSITORY/compare/$latest_tag...$RELEASE_SHA" --jq .status)"
+            case "$status" in
+              ahead|identical) ;;
+              behind) latest=false ;;
+              *) exit 1 ;;
+            esac
+          else
+            cat "$response.err" >&2
+            grep -q 'HTTP 404' "$response.err"
+          fi
           flags=()
-          if [[ "$CORE_TAG" == *-* ]]; then flags+=(--prerelease); fi
-          gh release create "$VERSION" dist/* --verify-tag --title "$VERSION" --notes-file dist/RELEASE_NOTES.txt "${flags[@]}"
+          if [[ "$CORE_TAG" == *-* ]]; then
+            flags+=(--prerelease)
+            latest=false
+          fi
+          gh release edit "$VERSION" --draft=false --latest="$latest" --notes-file dist/RELEASE_NOTES.txt "${flags[@]}"
