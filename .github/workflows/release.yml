@@ -176,5 +176,8 @@ jobs:
             grep -q 'HTTP 404' "$response.err"
           fi
           flags=()
-          if [[ "$CORE_TAG" == *-* ]]; then flags+=(--prerelease); fi
+          if [[ "$CORE_TAG" == *-* ]]; then
+            flags+=(--prerelease)
+            latest=false
+          fi
           gh release edit "$VERSION" --draft=false --latest="$latest" --notes-file dist/RELEASE_NOTES.txt "${flags[@]}"
