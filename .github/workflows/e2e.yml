@@ -31,12 +31,12 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
         with:
           go-version-file: go.mod
-      - name: Require reviewed local native evidence for every qualified tuple
-        shell: bash
-        run: |
-          test -n "$NATIVE_EVIDENCE" || { echo 'Reviewed native qualification evidence for the qualified hosts is absent; publication is blocked. Run mise run qualify:native on the maintainer Mac and record the result in SBX_NATIVE_EVIDENCE.' >&2; exit 1; }
-          printf '%s\n' "$NATIVE_EVIDENCE" > "$RUNNER_TEMP/native-evidence.json"
-          go run ./cmd/qualify-native verify --evidence "$RUNNER_TEMP/native-evidence.json" --release-commit "$RELEASE_COMMIT" --core-ref "$CORE_REF" --version "$VERSION"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          path: .workflow
+          persist-credentials: false
+      - uses: ./.workflow/.github/actions/verify-native-evidence
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: qualified-native-evidence
