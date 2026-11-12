@@ -3,3 +3,5 @@
 *.yml text eol=lf
 *.tmpl text eol=lf
 *.stderr text eol=lf
+internal/sbx/testdata/** -text
+qualification/** -text
