@@ -403,7 +403,7 @@ func TestDoctorReportsDaemonRestart(t *testing.T) {
 func daemonRestartError(t *testing.T) error {
 	t.Helper()
 	data, err := os.ReadFile(
-		filepath.Join("..", "sbx", "testdata", "v0.51.0", "inventory-daemon-restart.stderr"),
+		filepath.Join("..", "sbx", "testdata", "v0.51.0", "inventory-daemon-restart.txt"),
 	)
 	requireNoError(t, err)
 	restart := sbx.RestartError(data)

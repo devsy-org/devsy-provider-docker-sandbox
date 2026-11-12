@@ -109,7 +109,7 @@ func TestFakeVersionAndInventory(t *testing.T) {
 func TestControlDaemonRestart(t *testing.T) {
 	c := testClient(t)
 	message, err := os.ReadFile(
-		filepath.Join("testdata", "v0.51.0", "inventory-daemon-restart.stderr"),
+		filepath.Join("testdata", "v0.51.0", "inventory-daemon-restart.txt"),
 	)
 	if err != nil {
 		t.Fatal(err)

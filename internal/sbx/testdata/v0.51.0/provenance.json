@@ -7,7 +7,7 @@
   "daemon_revision": "7d55286de0c775148b985ed349f760f1eba06203",
   "captures": [
     {
-      "file": "inventory-daemon-restart.stderr",
+      "file": "inventory-daemon-restart.txt",
       "sha256": "daf70a47145cb88a83909c97d13233cdbf329eda7b5b748304cf7ad1499de97f",
       "kind": "daemon_restart_required",
       "command": "sbx ls --format json",
@@ -86,6 +86,15 @@
       "kind": "inventory_empty",
       "command": "sbx ls --format json",
       "exit": 0
+    },
+    {
+      "file": "failure-missing-sandbox.txt",
+      "sha256": "de7b1b202dc7d62db3349d649fee473ac176d0e50e37b0d411ae7896efb56fcf",
+      "kind": "failure",
+      "command": "sbx exec --interactive --user root --workdir / devsy-qual-absent-20261104 -- /bin/true",
+      "exit": 125,
+      "stream": "stderr",
+      "observed_at": "2026-11-11"
     }
   ],
   "sbx_archive_sha256": "1ab45fd1c93d30ceec6fdb228da7698b8b1eebc25cf969027b83a437cef415f9",
