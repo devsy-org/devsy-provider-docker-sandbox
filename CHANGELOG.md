@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/devsy-org/devsy-provider-docker-sandbox/compare/v1.0.0...v1.0.1) (2026-11-12)
+
+
+### Documentation
+
+* keep native evidence in the repository variable ([#29](https://github.com/devsy-org/devsy-provider-docker-sandbox/issues/29)) ([fbb920c](https://github.com/devsy-org/devsy-provider-docker-sandbox/commit/fbb920c4f7fc2fd6e8fd5aad2bc1b4eaeb05d1a1))
+
 ## [1.0.0](https://github.com/devsy-org/devsy-provider-docker-sandbox/compare/v0.1.1...v1.0.0) (2026-11-11)
 
 
