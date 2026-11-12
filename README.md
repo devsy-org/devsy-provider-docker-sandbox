@@ -25,7 +25,7 @@ Contributors: [AGENTS.md](AGENTS.md).
 
 ## Releases
 
-Set `SBX_DISTRIBUTION_CORE_REF` to the verified commit of the published core release named by `minimum_devsy_version` in the profile. Merging the release PR creates a draft release and tag. Store reviewed native evidence for that version in the `SBX_NATIVE_EVIDENCE` repository variable. `Release assets` verifies the evidence and publishes the assets. To recover a failure, follow the release instructions in [AGENTS.md](AGENTS.md) and rerun `Release assets` with the tag.
+The release workflow resolves the verified core commit from the published release named by `minimum_devsy_version` in the profile. Merging the release PR creates a draft release and tag. Store reviewed native evidence for that version in the `SBX_NATIVE_EVIDENCE` repository variable. `Release assets` verifies the evidence and publishes the assets. To recover a failure, follow the release instructions in [AGENTS.md](AGENTS.md) and rerun `Release assets` with the tag.
 
 ## License
 

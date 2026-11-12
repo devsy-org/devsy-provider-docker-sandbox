@@ -33,6 +33,7 @@ jobs:
       - id: resolve
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ inputs.tag }}
           EXPECTED_SHA: ${{ inputs.expected_sha }}
           EVENT_NAME: ${{ github.event_name }}
@@ -56,11 +57,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ inputs.tag }}
           RELEASE_SHA: ${{ steps.resolve.outputs.sha }}
-          CORE_REF: ${{ vars.SBX_DISTRIBUTION_CORE_REF }}
         run: |
           CORE_TAG="$(jq -er .minimum_devsy_version internal/compat/profile.json)"
           [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          [[ "$CORE_REF" =~ ^[0-9a-f]{40}$ ]]
           git merge-base --is-ancestor "$RELEASE_SHA" origin/main
           jq -e --arg version "${VERSION#v}" '.["."] == $version' .release-please-manifest.json
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$RELEASE_SHA" --jq '.verification.verified')" = true
@@ -70,9 +69,12 @@ jobs:
           core_object="$(gh api "repos/devsy-org/devsy/git/ref/tags/$CORE_TAG" --jq .object.sha)"
           core_type="$(gh api "repos/devsy-org/devsy/git/ref/tags/$CORE_TAG" --jq .object.type)"
           if [[ "$core_type" == tag ]]; then
+            core_type="$(gh api "repos/devsy-org/devsy/git/tags/$core_object" --jq .object.type)"
             core_object="$(gh api "repos/devsy-org/devsy/git/tags/$core_object" --jq .object.sha)"
           fi
-          test "$core_object" = "$CORE_REF"
+          test "$core_type" = commit
+          CORE_REF="$core_object"
+          [[ "$CORE_REF" =~ ^[0-9a-f]{40}$ ]]
           test "$(gh api "repos/devsy-org/devsy/git/commits/$CORE_REF" --jq '.verification.verified')" = true
           echo "ref=$CORE_REF" >> "$GITHUB_OUTPUT"
           echo "tag=$CORE_TAG" >> "$GITHUB_OUTPUT"
@@ -139,6 +141,7 @@ jobs:
       - name: Publish complete release assets
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           VERSION: ${{ inputs.tag }}
           RELEASE_SHA: ${{ needs.resolve.outputs.sha }}
           CORE_TAG: ${{ needs.resolve.outputs.core_tag }}
