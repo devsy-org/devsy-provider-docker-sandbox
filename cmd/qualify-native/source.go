@@ -85,11 +85,22 @@ func verifyReleaseSource(candidate, release string) error {
 	if _, err := output("git", "merge-base", "--is-ancestor", candidate, release); err != nil {
 		return fmt.Errorf("candidate is not an ancestor of release: %w", err)
 	}
+	if candidate == release {
+		return nil
+	}
+	merges, err := output("git", "rev-list", "--min-parents=2", candidate+".."+release)
+	if err != nil {
+		return err
+	}
+	if len(bytes.TrimSpace(merges)) != 0 {
+		return errors.New("release history contains a merge commit")
+	}
 	diff, err := output(
 		"git",
 		"diff",
 		"--no-renames",
-		"--name-status",
+		"--raw",
+		"--ignore-submodules=none",
 		"-z",
 		candidate,
 		release,
@@ -104,16 +115,21 @@ func verifyReleaseSource(candidate, release string) error {
 func verifyReleaseDiff(diff []byte) error {
 	fields := bytes.Split(bytes.TrimSuffix(diff, []byte{0}), []byte{0})
 	if len(diff) == 0 {
-		return nil
+		return errors.New("release changes are empty")
 	}
 	if len(fields)%2 != 0 {
 		return errors.New("invalid git diff")
 	}
 	for i := 0; i < len(fields); i += 2 {
-		status, path := string(fields[i]), string(fields[i+1])
-		if status != "M" || (path != ".release-please-manifest.json" && path != "CHANGELOG.md") {
-			return fmt.Errorf("disallowed release change %s %s", status, path)
+		entry, path := strings.Fields(string(fields[i])), string(fields[i+1])
+		if !validReleaseChange(entry, path) {
+			return fmt.Errorf("disallowed release change %s %s", fields[i], path)
 		}
 	}
 	return nil
+}
+
+func validReleaseChange(entry []string, path string) bool {
+	return len(entry) == 5 && entry[0] == ":100644" && entry[1] == "100644" && entry[4] == "M" &&
+		(path == ".release-please-manifest.json" || path == "CHANGELOG.md")
 }

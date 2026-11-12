@@ -51,7 +51,7 @@ The task checks the tree and `sbx` with `go run ./cmd/qualify-native preflight`,
 
 To prove the pipeline without the full suite, set `QUALIFY_TEST_OUTPUT_SELECTION` to a narrower `-run` pattern. The writer then labels the file `native-evidence.test-output.json`, sets `local_run.kind` to `local-test-output` and marks every gate `not_run`. `verify` always rejects such a file, so it can never be stored as `SBX_NATIVE_EVIDENCE`. The writer takes the qualified `sbx` client, revision and daemon from `internal/compat/profile.json`, so qualifying a new `sbx` version means updating the profile and fixtures first, then running the task.
 
-Store reviewed native evidence only in the `SBX_NATIVE_EVIDENCE` repository variable before the release PR merges. The `evidence` job in `.github/workflows/e2e.yml` verifies it for releases. The local build is a cross compile of the same sources, so it is not byte compared with the CI artifact.
+Store reviewed native evidence only in the `SBX_NATIVE_EVIDENCE` repository variable. It may be supplied before or after the release PR merges. The `evidence` job in `.github/workflows/e2e.yml` verifies it for releases. The local build is a cross compile of the same sources, so it is not byte compared with the CI artifact.
 
 The tests read these environment variables, which `qualify:native` sets: `DEVSY_NATIVE_CORE_BIN`, `DEVSY_NATIVE_CORE_SOURCE`, `DEVSY_NATIVE_RELEASE_DIR`, `DEVSY_NATIVE_VERSION`, `DEVSY_NATIVE_CANCEL_HELPER`, `SBX_PATH` and `SBX_NATIVE_DENIED_URL`. A test that needs one of them fails when it is missing. The workspace test logs the guest Docker, buildx and Compose versions on a `native-evidence` line that the writer reads.
 
@@ -147,6 +147,8 @@ Write documentation in plain English, with simple sentences. Do not join sentenc
 
 ### Releasing
 
-Run `mise run qualify:native` on an ancestor of the release commit before the release PR merges, using its intended version. The candidate should be the main head before the release PR merges. Only modifications to `.release-please-manifest.json` and `CHANGELOG.md` may follow it. Store reviewed evidence only in the `SBX_NATIVE_EVIDENCE` repository variable. Set `SBX_DISTRIBUTION_CORE_REF` to the verified commit of the published core release named by `minimum_devsy_version` in the profile.
+Set `SBX_DISTRIBUTION_CORE_REF` to the verified commit of the published core release named by `minimum_devsy_version` in the profile. Release PRs auto merge after CI. Merging creates a draft release and tag, and `Release assets` verifies the commit, core release, distribution and native evidence before publishing. Evidence for the release version can be stored before the merge, but it normally does not exist yet. A failed run never publishes, so a draft and tag left by a failed run are expected.
 
-Merging the release PR creates a draft release and tag. `Release assets` verifies the commit, core release, distribution and native evidence, then publishes the complete assets. To recover, rerun `Release assets` with the tag. An already published release is verified without uploading again. The release publishes all four hosts. Release notes and the README list qualified hosts and hosts built and unit tested only.
+To recover, check out the release commit's parent and run `mise run qualify:native` with the release tag as `RELEASE_TAG` and the parent as `CANDIDATE_COMMIT`. The evidence version must equal the tag. Only modifications to `.release-please-manifest.json` and `CHANGELOG.md` may follow the candidate. Store reviewed evidence only in the `SBX_NATIVE_EVIDENCE` repository variable, then dispatch `Release assets` with the tag. An already published release is verified without uploading again. If a release is abandoned, delete its draft and tag only with `gh release delete <tag> --cleanup-tag`.
+
+The release publishes all four hosts. Release notes and the README list qualified hosts and hosts built and unit tested only.
