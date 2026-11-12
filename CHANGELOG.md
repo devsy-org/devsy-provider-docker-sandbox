@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.2](https://github.com/devsy-org/devsy-provider-docker-sandbox/compare/v1.0.1...v1.0.2) (2026-11-12)
+
+
+### Documentation
+
+* warn against editing Release Please PR bodies ([#36](https://github.com/devsy-org/devsy-provider-docker-sandbox/issues/36)) ([bc84ca8](https://github.com/devsy-org/devsy-provider-docker-sandbox/commit/bc84ca87ba878bddb32c07c610f302df0540a80c))
+
 ## [1.0.1](https://github.com/devsy-org/devsy-provider-docker-sandbox/compare/v1.0.0...v1.0.1) (2026-11-12)
 
 
