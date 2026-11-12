@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/devsy-org/devsy-provider-docker-sandbox/internal/compat"
@@ -32,6 +31,9 @@ func preflight(args []string) error {
 	}
 	if !qualify.ValidCommit(*candidate) {
 		return errors.New("--candidate must be a 40 character commit")
+	}
+	if err := qualifiedCaptures(profile); err != nil {
+		return err
 	}
 	head, dirty, err := gitState()
 	if err != nil {
@@ -136,13 +138,10 @@ func write(args []string) error {
 	if err != nil {
 		return err
 	}
-	data, err := readFile(
-		filepath.Join("internal", "sbx", "testdata", tuple.Client, "provenance.json"),
-	)
+	r.ProvenanceSHA256, err = fixtureFingerprint(tuple.Client)
 	if err != nil {
 		return err
 	}
-	r.ProvenanceSHA256 = qualify.SHA256Hex(data)
 	host, err := qualify.Build(profile, r)
 	if err != nil {
 		return fmt.Errorf("refusing to write evidence: %w", err)
@@ -190,9 +189,12 @@ func verify(args []string) error {
 	if err := json.Unmarshal(data, &ev); err != nil {
 		return fmt.Errorf("unreadable evidence: %w", err)
 	}
-	return qualify.Verify(
+	if err := qualify.Verify(
 		profile,
 		ev,
 		qualify.Expect{Candidate: *candidate, CoreCommit: *core, Version: *version},
-	)
+	); err != nil {
+		return err
+	}
+	return verifyFixtureEvidence(ev)
 }
