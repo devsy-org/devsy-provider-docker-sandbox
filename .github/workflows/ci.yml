@@ -128,7 +128,7 @@ jobs:
         run: jq -e --arg release "$RELEASE_PR" 'all(to_entries[]; if .key == "release-evidence" and $release == "false" then .value.result == "skipped" else .value.result == "success" end)' <<< "$RESULTS"
   release-please:
     name: Release Please
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: ${{ always() && needs.ci-success.result == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     needs: ci-success
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -180,7 +180,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           RELEASE_PRS: ${{ steps.release.outputs.prs }}
   release-assets:
-    if: needs.release-please.outputs.created == 'true'
+    if: ${{ always() && needs.release-please.result == 'success' && needs.release-please.outputs.created == 'true' }}
     needs: release-please
     uses: ./.github/workflows/release.yml
     permissions:
