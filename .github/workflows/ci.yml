@@ -75,7 +75,7 @@ jobs:
     uses: ./.github/workflows/distribution.yml
     with:
       version: v0.0.0-ci
-      core_ref: ${{ vars.SBX_DISTRIBUTION_CORE_REF || '77f2b2dd8770c2d54cae9cf34c10b1c18dbb0993' }}
+      core_ref: ${{ vars.SBX_DISTRIBUTION_CORE_REF || '0cc91ca17e7f276f47c1bc90cf26f7ce7428e71b' }}
   ci-success:
     name: CI Success
     if: always()

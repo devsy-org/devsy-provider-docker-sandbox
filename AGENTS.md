@@ -10,7 +10,7 @@ This repository is a Devsy machine provider backed by the standalone Docker Sand
 
 Toolchain is managed by mise. Install mise using `curl https://mise.run | sh`. Install the toolchain (Go, golangci-lint and prek, pinned in `mise.toml`) with `mise install`. Then run `mise run setup` to download Go modules and install the git hooks.
 
-Running the provider against real sandboxes needs the standalone `sbx` executable, signed in. Devsy `v1.27.0-beta.4` or newer is required.
+Running the provider against real sandboxes needs the standalone `sbx` executable, signed in. Devsy `v1.27.0` or newer is required.
 
 ---
 
@@ -63,7 +63,7 @@ The `concurrency_crash` evidence needs concurrent guest sessions and `TestNative
 
 - `sbx` client `v0.51.0`, revision `7d55286de0c775148b985ed349f760f1eba06203`, daemon `v0.51.0`.
 - Qualified host: `darwin/arm64`.
-- Minimum Devsy core: `v1.27.0-beta.4`.
+- Minimum Devsy core: `v1.27.0`.
 
 Every other host is built and unit tested only. It still runs, with one warning that says so, and `doctor` reports the same warning. Only the host check and the per-host disk sizing check depend on `qualified_hosts`.
 

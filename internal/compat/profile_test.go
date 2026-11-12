@@ -10,12 +10,13 @@ import (
 )
 
 const (
-	betaMinimum      = "v1.27.0-beta.4"
-	unmeasured       = "unmeasured"
-	otherHost        = "plan9/mips"
-	measuredVersion  = "v0.50.1"
-	measuredRevision = "measured"
-	newerVersion     = "v0.51.0"
+	stableMinimum     = "v1.27.0"
+	prereleaseMinimum = "v1.27.0-beta.5"
+	unmeasured        = "unmeasured"
+	otherHost         = "plan9/mips"
+	measuredVersion   = "v0.50.1"
+	measuredRevision  = "measured"
+	newerVersion      = "v0.51.0"
 )
 
 func TestUnqualifiedProfileFailsClosed(t *testing.T) {
@@ -90,13 +91,17 @@ func TestDevsyVersionAdmission(t *testing.T) {
 		name, minimum, reported string
 		admitted                bool
 	}{
-		{"prerelease equal to prerelease minimum", betaMinimum, betaMinimum, true},
-		{"later prerelease", betaMinimum, "v1.27.0-beta.5", true},
-		{"stable after prerelease minimum", betaMinimum, "v1.27.0", true},
-		{"earlier prerelease", betaMinimum, "v1.27.0-beta.3", false},
-		{"prerelease of stable minimum", "v1.27.0", betaMinimum, false},
-		{"development build", betaMinimum, "v0.0.0-dev", false},
-		{"older stable", betaMinimum, "v1.26.0", false},
+		{"stable equal to minimum", stableMinimum, stableMinimum, true},
+		{"later patch", stableMinimum, "v1.27.1", true},
+		{"later minor prerelease", stableMinimum, "v1.28.0-beta.1", true},
+		{"prerelease of stable minimum", stableMinimum, prereleaseMinimum, false},
+		{"release candidate of stable minimum", stableMinimum, "v1.27.0-rc.1", false},
+		{"prerelease equal to prerelease minimum", prereleaseMinimum, prereleaseMinimum, true},
+		{"later prerelease", prereleaseMinimum, "v1.27.0-beta.6", true},
+		{"earlier prerelease", prereleaseMinimum, "v1.27.0-beta.2", false},
+		{"stable after prerelease minimum", prereleaseMinimum, stableMinimum, true},
+		{"development build", stableMinimum, "v0.0.0-dev", false},
+		{"older stable", stableMinimum, "v1.26.0", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			devsy := filepath.Join(t.TempDir(), "devsy")
