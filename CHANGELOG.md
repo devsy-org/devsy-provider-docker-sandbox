@@ -3,6 +3,8 @@
 ## [1.0.0](https://github.com/devsy-org/devsy-provider-docker-sandbox/compare/v0.1.1...v1.0.0) (2026-11-11)
 
 
+Natively qualified: darwin/arm64 with sbx v0.51.0. Built and unit tested only: linux/amd64, linux/arm64 and windows/amd64. Hosts without native qualification evidence run with a warning.
+
 ### Features
 
 * **release:** publish all supported hosts and warn on unqualified ones ([9498eef](https://github.com/devsy-org/devsy-provider-docker-sandbox/commit/9498eef5412c74bf92064b5fb1ba86989d6e2185))
