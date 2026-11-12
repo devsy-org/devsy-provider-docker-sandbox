@@ -142,8 +142,15 @@ jobs:
           CORE_TAG: ${{ needs.resolve.outputs.core_tag }}
         run: |
           test "$(gh api "repos/$GITHUB_REPOSITORY/commits/$VERSION" --jq .sha)" = "$RELEASE_SHA"
+          verify_assets() {
+            local expected actual
+            expected="$(printf '%s\n' dist/* | sed 's|^dist/||' | LC_ALL=C sort)"
+            actual="$(gh release view "$VERSION" --json assets --jq '.assets[].name' | LC_ALL=C sort)"
+            test "$actual" = "$expected"
+          }
           draft="$(gh release view "$VERSION" --json isDraft --jq .isDraft)"
           if [[ "$draft" == false ]]; then
+            verify_assets
             remote="$(mktemp -d)"
             trap 'rm -rf "$remote"' EXIT
             gh release download "$VERSION" --dir "$remote" --pattern '*'
@@ -160,6 +167,7 @@ jobs:
           fi
           [[ "$draft" == true ]]
           gh release upload "$VERSION" dist/* --clobber
+          verify_assets
           response="$(mktemp)"
           trap 'rm -f "$response" "$response.err"' EXIT
           latest=true
