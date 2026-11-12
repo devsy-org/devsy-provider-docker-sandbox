@@ -1,0 +1,16 @@
+name: Verify native evidence
+description: Verify reviewed local qualification evidence
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        if [[ -z "$NATIVE_EVIDENCE" ]]; then
+          echo 'Native evidence is absent. Run mise run qualify:native on the maintainer Mac at the release PR base commit, store the reviewed file in repository variable SBX_NATIVE_EVIDENCE, then re-run the failed check.' >&2
+          exit 1
+        fi
+        printf '%s\n' "$NATIVE_EVIDENCE" > "$RUNNER_TEMP/native-evidence.json"
+        if ! go run ./cmd/qualify-native verify --evidence "$RUNNER_TEMP/native-evidence.json" --release-commit "$RELEASE_COMMIT" --core-ref "$CORE_REF" --version "$VERSION"; then
+          echo 'Native evidence verification failed. Run mise run qualify:native on the maintainer Mac at the release PR base commit, store the reviewed file in repository variable SBX_NATIVE_EVIDENCE, then re-run the failed check.' >&2
+          exit 1
+        fi

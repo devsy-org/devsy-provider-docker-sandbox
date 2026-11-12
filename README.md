@@ -25,7 +25,7 @@ Contributors: [AGENTS.md](AGENTS.md).
 
 ## Releases
 
-The release workflow resolves the verified core commit from the published release named by `minimum_devsy_version` in the profile. Merging the release PR creates a draft release and tag. Store reviewed native evidence for that version in the `SBX_NATIVE_EVIDENCE` repository variable. `Release assets` verifies the evidence and publishes the assets. To recover a failure, follow the release instructions in [AGENTS.md](AGENTS.md) and rerun `Release assets` with the tag.
+Release Please opens a release PR for user facing changes. Before it can merge, the maintainer qualifies its base commit on a Mac and stores reviewed evidence in the `SBX_NATIVE_EVIDENCE` repository variable. Re-run the failed check to continue. If the base changes, qualify the new base. After the PR merges, the workflow creates a draft and tag, verifies the evidence again, and publishes the assets. See [AGENTS.md](AGENTS.md) for the qualification inputs and recovery instructions.
 
 ## License
 

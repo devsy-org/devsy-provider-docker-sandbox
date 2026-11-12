@@ -76,17 +76,56 @@ jobs:
     with:
       version: v0.0.0-ci
       core_ref: ${{ vars.SBX_DISTRIBUTION_CORE_REF || '0cc91ca17e7f276f47c1bc90cf26f7ce7428e71b' }}
+  release-evidence:
+    name: Release evidence
+    if: github.event_name == 'pull_request' && github.head_ref == 'release-please--branches--main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_COMMIT: ${{ github.event.pull_request.head.sha }}
+      NATIVE_EVIDENCE: ${{ vars.SBX_NATIVE_EVIDENCE }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+      - name: Resolve release inputs
+        shell: bash
+        run: |
+          core_tag="$(jq -er .minimum_devsy_version internal/compat/profile.json)"
+          [[ "$core_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$ ]]
+          test "$(gh api "repos/devsy-org/devsy/releases/tags/$core_tag" --jq '.draft == false')" = true
+          core_object="$(gh api "repos/devsy-org/devsy/git/ref/tags/$core_tag" --jq .object.sha)"
+          core_type="$(gh api "repos/devsy-org/devsy/git/ref/tags/$core_tag" --jq .object.type)"
+          if [[ "$core_type" == tag ]]; then
+            core_type="$(gh api "repos/devsy-org/devsy/git/tags/$core_object" --jq .object.type)"
+            core_object="$(gh api "repos/devsy-org/devsy/git/tags/$core_object" --jq .object.sha)"
+          fi
+          test "$core_type" = commit
+          [[ "$core_object" =~ ^[0-9a-f]{40}$ ]]
+          test "$(gh api "repos/devsy-org/devsy/git/commits/$core_object" --jq '.verification.verified')" = true
+          version="v$(jq -er '.["."]' .release-please-manifest.json)"
+          [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          echo "CORE_REF=$core_object" >> "$GITHUB_ENV"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+      - uses: ./.github/actions/verify-native-evidence
   ci-success:
     name: CI Success
     if: always()
-    needs: [test, pre-commit, lint, distribution]
+    needs: [test, pre-commit, lint, distribution, release-evidence]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Require every validation job to pass
         env:
           RESULTS: ${{ toJSON(needs) }}
-        run: jq -e 'all(.[]; .result == "success")' <<< "$RESULTS"
+          RELEASE_PR: ${{ github.event_name == 'pull_request' && github.head_ref == 'release-please--branches--main' }}
+        run: jq -e --arg release "$RELEASE_PR" 'all(to_entries[]; if .key == "release-evidence" and $release == "false" then .value.result == "skipped" else .value.result == "success" end)' <<< "$RESULTS"
   release-please:
     name: Release Please
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -130,7 +169,7 @@ jobs:
           release_head="$(gh pr view "$release_pr" --json headRefOid --jq .headRefOid)"
           behind="$(gh api "repos/$GH_REPO/compare/main...$release_head" --jq .behind_by)"
           if [[ "$behind" -gt 0 ]]; then
-            gh pr update-branch "$release_pr"
+            gh pr update-branch "$release_pr" --rebase
             release_head="$(gh pr view "$release_pr" --json headRefOid --jq .headRefOid)"
           fi
           release_title="$(gh pr view "$release_pr" --json title --jq .title)"
