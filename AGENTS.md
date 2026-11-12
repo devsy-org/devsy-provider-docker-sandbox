@@ -51,7 +51,7 @@ The task checks the tree and `sbx` with `go run ./cmd/qualify-native preflight`,
 
 To prove the pipeline without the full suite, set `QUALIFY_TEST_OUTPUT_SELECTION` to a narrower `-run` pattern. The writer then labels the file `native-evidence.test-output.json`, sets `local_run.kind` to `local-test-output` and marks every gate `not_run`. `verify` always rejects such a file, so it can never be stored as `SBX_NATIVE_EVIDENCE`. The writer takes the qualified `sbx` client, revision and daemon from `internal/compat/profile.json`, so qualifying a new `sbx` version means updating the profile and fixtures first, then running the task.
 
-Store reviewed native evidence only in the `SBX_NATIVE_EVIDENCE` repository variable. Do not define that variable in any GitHub environment because it would override the repository value. The `evidence` job in `.github/workflows/e2e.yml` checks it with `go run ./cmd/qualify-native verify` and runs only inside a release dispatch, so ordinary pull requests never need evidence. It uses the protected `native-sandbox-qualification` environment as the approval step. The local build is a cross compile of the same sources, so it is not byte compared with the CI artifact.
+Store reviewed native evidence only in the `SBX_NATIVE_EVIDENCE` repository variable before the release PR merges. The `evidence` job in `.github/workflows/e2e.yml` verifies it for releases. The local build is a cross compile of the same sources, so it is not byte compared with the CI artifact.
 
 The tests read these environment variables, which `qualify:native` sets: `DEVSY_NATIVE_CORE_BIN`, `DEVSY_NATIVE_CORE_SOURCE`, `DEVSY_NATIVE_RELEASE_DIR`, `DEVSY_NATIVE_VERSION`, `DEVSY_NATIVE_CANCEL_HELPER`, `SBX_PATH` and `SBX_NATIVE_DENIED_URL`. A test that needs one of them fails when it is missing. The workspace test logs the guest Docker, buildx and Compose versions on a `native-evidence` line that the writer reads.
 
@@ -147,12 +147,6 @@ Write documentation in plain English, with simple sentences. Do not join sentenc
 
 ### Releasing
 
-Release Please runs with `skip-github-release`, so it opens release pull requests but creates no tag and no release.
+Run `mise run qualify:native` on an ancestor of the release commit before the release PR merges, using its intended version. The candidate should be the main head before the release PR merges. Only modifications to `.release-please-manifest.json` and `CHANGELOG.md` may follow it. Store reviewed evidence only in the `SBX_NATIVE_EVIDENCE` repository variable. Set `SBX_DISTRIBUTION_CORE_REF` to the verified commit of the published core release named by `minimum_devsy_version` in the profile.
 
-1. After the release pull request merges, an operator creates a signed tag on the merged release commit. The tag version must match `.release-please-manifest.json`.
-2. Remove the `autorelease: pending` label from the release pull request and add `autorelease: tagged`, so Release Please can continue opening release pull requests.
-3. Run `mise run qualify:native` on the maintainer Mac at the tagged commit (see Native Tests) and review the evidence file.
-4. Store the evidence in the `SBX_NATIVE_EVIDENCE` repository variable.
-5. Dispatch the `Qualified provider release` workflow (`release.yml`) from the tag ref. Inputs: `version` (the tag), `core_ref` (the commit SHA of a released compatible Devsy core) and `core_tag` (that core release tag). The workflow checks the signed tag and commit, builds and tests all four hosts, installs the provider with the pinned core and validates the evidence against the profile. The `publish` job then waits for approval in the protected `provider-release` environment and creates the release.
-
-The release publishes all four hosts. Release notes and the README must list which hosts are natively qualified and which are built and unit tested only.
+Merging the release PR creates a draft release and tag. `Release assets` verifies the commit, core release, distribution and native evidence, then publishes the complete assets. To recover, rerun `Release assets` with the tag. An already published release is verified without uploading again. The release publishes all four hosts. Release notes and the README list qualified hosts and hosts built and unit tested only.

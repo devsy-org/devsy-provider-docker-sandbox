@@ -171,7 +171,7 @@ func writeEvidence(path string, r qualify.Run, host qualify.Host) error {
 func verify(args []string) error {
 	fs := newFlags("verify")
 	file := fs.String("evidence", "", "evidence file")
-	candidate := fs.String("candidate", "", "candidate commit")
+	release := fs.String("release-commit", "", "release commit")
 	core := fs.String("core-ref", "", "core commit")
 	version := fs.String("version", "", "provider version")
 	if err := fs.Parse(args); err != nil {
@@ -192,8 +192,11 @@ func verify(args []string) error {
 	if err := qualify.Verify(
 		profile,
 		ev,
-		qualify.Expect{Candidate: *candidate, CoreCommit: *core, Version: *version},
+		qualify.Expect{Candidate: ev.CandidateCommit, CoreCommit: *core, Version: *version},
 	); err != nil {
+		return err
+	}
+	if err := verifyReleaseSource(ev.CandidateCommit, *release); err != nil {
 		return err
 	}
 	return verifyFixtureEvidence(ev)

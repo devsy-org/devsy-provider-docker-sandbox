@@ -11,6 +11,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/devsy-org/devsy-provider-docker-sandbox/internal/qualify"
 )
 
 func output(name string, args ...string) ([]byte, error) {
@@ -74,4 +76,44 @@ func writeFile(path string, data []byte) error {
 	}
 	defer func() { _ = root.Close() }()
 	return root.WriteFile(filepath.Base(path), data, 0o600)
+}
+
+func verifyReleaseSource(candidate, release string) error {
+	if !qualify.ValidCommit(candidate) || !qualify.ValidCommit(release) {
+		return errors.New("candidate and release must be full commit hashes")
+	}
+	if _, err := output("git", "merge-base", "--is-ancestor", candidate, release); err != nil {
+		return fmt.Errorf("candidate is not an ancestor of release: %w", err)
+	}
+	diff, err := output(
+		"git",
+		"diff",
+		"--no-renames",
+		"--name-status",
+		"-z",
+		candidate,
+		release,
+		"--",
+	)
+	if err != nil {
+		return err
+	}
+	return verifyReleaseDiff(diff)
+}
+
+func verifyReleaseDiff(diff []byte) error {
+	fields := bytes.Split(bytes.TrimSuffix(diff, []byte{0}), []byte{0})
+	if len(diff) == 0 {
+		return nil
+	}
+	if len(fields)%2 != 0 {
+		return errors.New("invalid git diff")
+	}
+	for i := 0; i < len(fields); i += 2 {
+		status, path := string(fields[i]), string(fields[i+1])
+		if status != "M" || (path != ".release-please-manifest.json" && path != "CHANGELOG.md") {
+			return fmt.Errorf("disallowed release change %s %s", status, path)
+		}
+	}
+	return nil
 }

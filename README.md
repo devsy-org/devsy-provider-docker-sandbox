@@ -26,3 +26,5 @@ Contributors: [AGENTS.md](AGENTS.md).
 ## License
 
 [MPL-2.0](LICENSE).
+
+Before the release PR merges, store reviewed native evidence for its intended version in the `SBX_NATIVE_EVIDENCE` repository variable. Merging the release PR creates a draft release and tag. `Release assets` verifies the evidence and publishes the assets. To recover a failure, rerun `Release assets` with the tag.

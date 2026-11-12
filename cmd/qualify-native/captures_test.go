@@ -20,13 +20,14 @@ func TestVerifyChecksFixtureFingerprint(t *testing.T) {
 	if err := json.Unmarshal(data, &ev); err != nil {
 		t.Fatal(err)
 	}
+	setCandidateToHead(t, &ev)
 	fingerprint, err := fixtureFingerprint(ev.Hosts[0].ClientVersion)
 	if err != nil {
 		t.Fatal(err)
 	}
 	file := filepath.Join(t.TempDir(), "evidence.json")
 	args := []string{
-		"--evidence", file, "--candidate", ev.CandidateCommit,
+		"--evidence", file, "--release-commit", ev.CandidateCommit,
 		"--core-ref", ev.CoreCommit, "--version", ev.ProviderVersion,
 	}
 	writeTestEvidence(t, file, ev)
@@ -48,5 +49,17 @@ func writeTestEvidence(t *testing.T, file string, ev qualify.Evidence) {
 	}
 	if err := os.WriteFile(file, data, 0o600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func setCandidateToHead(t *testing.T, ev *qualify.Evidence) {
+	t.Helper()
+	head, _, err := gitState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ev.CandidateCommit = head
+	for i := range ev.Hosts {
+		ev.Hosts[i].ProviderCommit = head
 	}
 }

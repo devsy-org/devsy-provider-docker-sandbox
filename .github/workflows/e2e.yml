@@ -8,21 +8,25 @@ on:
       core_ref:
         required: true
         type: string
+      ref:
+        required: true
+        type: string
 permissions:
   contents: read
 jobs:
   evidence:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    environment: native-sandbox-qualification
     env:
-      CANDIDATE: ${{ github.sha }}
+      RELEASE_COMMIT: ${{ inputs.ref }}
       CORE_REF: ${{ inputs.core_ref }}
       VERSION: ${{ inputs.version }}
       NATIVE_EVIDENCE: ${{ vars.SBX_NATIVE_EVIDENCE }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
         with:
@@ -32,23 +36,7 @@ jobs:
         run: |
           test -n "$NATIVE_EVIDENCE" || { echo 'Reviewed native qualification evidence for the qualified hosts is absent; publication is blocked. Run mise run qualify:native on the maintainer Mac and record the result in SBX_NATIVE_EVIDENCE.' >&2; exit 1; }
           printf '%s\n' "$NATIVE_EVIDENCE" > "$RUNNER_TEMP/native-evidence.json"
-          go run ./cmd/qualify-native verify --evidence "$RUNNER_TEMP/native-evidence.json" --candidate "$CANDIDATE" --core-ref "$CORE_REF" --version "$VERSION"
-          jq -r '.hosts[] | [.client_version, .fixture_provenance_sha256] | @tsv' <<< "$NATIVE_EVIDENCE" | while IFS=$'\t' read -r client_version fingerprint; do
-            [[ "$client_version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
-            [[ "$fingerprint" =~ ^[0-9a-f]{64}$ ]]
-            provenance="internal/sbx/testdata/$client_version/provenance.json"
-            test -s "$provenance"
-            read -r actual _ < <(sha256sum "$provenance")
-            test "$actual" = "$fingerprint"
-            jq -e '.captures | type == "array" and length >= 4 and any(.[]; .kind == "failure") and any(.[]; .kind == "stop_result") and any(.[]; .kind == "rm_result")' "$provenance"
-            jq -r '.captures[] | [.file, .sha256] | @tsv' "$provenance" | while IFS=$'\t' read -r fixture expected; do
-              [[ "$fixture" =~ ^[A-Za-z0-9._-]+\.(json|txt)$ ]]
-              [[ "$expected" =~ ^[0-9a-f]{64}$ ]]
-              test -s "internal/sbx/testdata/$client_version/$fixture"
-              read -r captured _ < <(sha256sum "internal/sbx/testdata/$client_version/$fixture")
-              test "$captured" = "$expected"
-            done
-          done
+          go run ./cmd/qualify-native verify --evidence "$RUNNER_TEMP/native-evidence.json" --release-commit "$RELEASE_COMMIT" --core-ref "$CORE_REF" --version "$VERSION"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: qualified-native-evidence
