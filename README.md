@@ -25,7 +25,7 @@ Contributors: [AGENTS.md](AGENTS.md).
 
 ## Releases
 
-Release Please opens a release PR for user facing changes. Before it can merge, the maintainer qualifies its base commit on a Mac and stores reviewed evidence in the `SBX_NATIVE_EVIDENCE` repository variable. Re-run the failed check to continue. If the base changes, qualify the new base. After the PR merges, the workflow creates a draft and tag, verifies the evidence again, and publishes the assets. See [AGENTS.md](AGENTS.md) for the qualification inputs and recovery instructions.
+Release Please opens a release PR for user-facing changes. Before it can merge, the maintainer qualifies its base commit on a Mac and stores reviewed evidence in the `SBX_NATIVE_EVIDENCE` repository variable. Re-run the failed `Release evidence` job or all failed jobs to continue. Re-running only `CI Success` retains the failed evidence result. If the base changes, qualify the new base. After the PR merges, the workflow creates a draft and tag, verifies the evidence again, and publishes the assets. See [AGENTS.md](AGENTS.md) for the qualification inputs and recovery instructions.
 
 ## License
 
