@@ -147,7 +147,7 @@ jobs:
             remote="$(mktemp -d)"
             trap 'rm -rf "$remote"' EXIT
             gh release download "$VERSION" --dir "$remote" --pattern '*'
-            for file in dist/*; do test -f "$remote/$(basename "$file")"; done
+            for file in dist/*; do cmp "$file" "$remote/$(basename "$file")"; done
             cp "$remote/provider.yaml" "$remote/provider.yaml.published"
             cp "$remote/checksums.txt" "$remote/checksums.txt.published"
             cp "$remote/compatibility-profile.json" "$remote/compatibility-profile.json.published"
