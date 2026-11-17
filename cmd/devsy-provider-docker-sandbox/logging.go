@@ -75,6 +75,47 @@ func sensitiveValues(environ []string) []string {
 	return secrets
 }
 
+func secretMask(value string, secrets []string) []bool {
+	var masked []bool
+	for _, secret := range secrets {
+		for offset := 0; offset <= len(value)-len(secret); {
+			index := strings.Index(value[offset:], secret)
+			if index < 0 {
+				break
+			}
+			start := offset + index
+			if masked == nil {
+				masked = make([]bool, len(value))
+			}
+			for i := start; i < start+len(secret); i++ {
+				masked[i] = true
+			}
+			offset = start + 1
+		}
+	}
+	return masked
+}
+
+func redactSecrets(value string, secrets []string) string {
+	masked := secretMask(value, secrets)
+	if masked == nil {
+		return value
+	}
+	var result strings.Builder
+	for i := 0; i < len(value); {
+		if !masked[i] {
+			result.WriteByte(value[i])
+			i++
+			continue
+		}
+		result.WriteString("[REDACTED]")
+		for i < len(value) && masked[i] {
+			i++
+		}
+	}
+	return result.String()
+}
+
 func diagnosticAttrs(environ []string) func([]string, slog.Attr) slog.Attr {
 	secrets := sensitiveValues(environ)
 	return func(_ []string, attr slog.Attr) slog.Attr {
@@ -86,11 +127,7 @@ func diagnosticAttrs(environ []string) func([]string, slog.Attr) slog.Attr {
 			attr.Value = slog.StringValue(diagnosticLevelName(attr.Value))
 		case "detail":
 			if attr.Value.Kind() == slog.KindString {
-				value := attr.Value.String()
-				for _, secret := range secrets {
-					value = strings.ReplaceAll(value, secret, "[REDACTED]")
-				}
-				attr.Value = slog.StringValue(value)
+				attr.Value = slog.StringValue(redactSecrets(attr.Value.String(), secrets))
 			}
 		}
 		return attr

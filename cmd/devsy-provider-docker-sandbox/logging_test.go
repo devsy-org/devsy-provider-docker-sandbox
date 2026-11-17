@@ -17,6 +17,7 @@ import (
 const (
 	commandSecret = "COMMAND=secret-command"
 	testProvider  = "provider"
+	testDetail    = "detail"
 	testWarn      = "warn"
 )
 
@@ -43,7 +44,7 @@ func TestDiagnosticLevelsAndWireFormat(t *testing.T) {
 					"message",
 					"count",
 					7,
-					"detail",
+					testDetail,
 					"safe canary-secret",
 				)
 			}
@@ -161,6 +162,24 @@ func TestErrorDiagnosticRedaction(t *testing.T) {
 	}
 }
 
+func TestOverlappingSecretsAreFullyRedacted(t *testing.T) {
+	var out bytes.Buffer
+	logger, err := diagnosticLogger(&out, "info", jsonFormat, []string{
+		"API_TOKEN=abc",
+		"DB_PASSWORD=abc-secret-part",
+		"OTHER_SECRET=part-tail",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	logger.Error("failure", testDetail, "safe abc-secret-part-tail visible")
+	var record map[string]any
+	if err := json.Unmarshal(out.Bytes(), &record); err != nil {
+		t.Fatal(err)
+	}
+	assertFields(t, record, map[string]any{testDetail: "safe [REDACTED] visible"})
+}
+
 func TestMandatoryCompatibilityWarningBypassesErrorThreshold(t *testing.T) {
 	var out bytes.Buffer
 	logger, mandatory, err := diagnosticLoggers(
@@ -186,7 +205,7 @@ func TestMandatoryCompatibilityWarningBypassesErrorThreshold(t *testing.T) {
 	assertFields(t, record, map[string]any{
 		"level": testWarn, slog.MessageKey: "provider warning", "component": testProvider,
 		testProvider: "docker-sandbox", "operation": "status",
-		"detail": "compatibility detail [REDACTED]",
+		testDetail: "compatibility detail [REDACTED]",
 	})
 	if _, err := time.Parse("2006-01-02T15:04:05.000Z0700", record["ts"].(string)); err != nil {
 		t.Fatal(err)
@@ -213,7 +232,7 @@ func assertDiagnosticRecord(t *testing.T, line string) {
 	}
 	assertFields(t, record, map[string]any{
 		slog.MessageKey: "message", "count": float64(7), "component": testProvider,
-		testProvider: "docker-sandbox", "detail": "safe [REDACTED]",
+		testProvider: "docker-sandbox", testDetail: "safe [REDACTED]",
 	})
 	if strings.Contains(line, "canary-secret") {
 		t.Fatal("secret leaked")
