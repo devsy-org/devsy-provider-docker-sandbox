@@ -23,7 +23,7 @@ Customer documentation: [Docker Sandboxes provider](https://devsy.sh/docs/managi
 
 ## Diagnostics
 
-Provider diagnostics use JSON on standard error by default. Set `DEVSY_LOG_LEVEL` to `trace`, `debug`, `info`, `warn`, or `error`. The default is `info`. Set `DEVSY_LOG_FORMAT` to `auto`, `json`, `text`, or `plain`. The default and `auto` select JSON. Level and format values are case insensitive. Command output and guest streams remain unchanged.
+Provider diagnostics use JSON on standard error by default. Set `DEVSY_LOG_LEVEL` to `trace`, `debug`, `info`, `warn`, or `error`. The default is `info`. Set `DEVSY_LOG_FORMAT` to `auto`, `json`, `text`, `plain`, or `logfmt`. The default and `auto` select JSON. Level and format values are case insensitive and do not accept surrounding whitespace. Command output and guest streams remain unchanged.
 
 Compatibility warnings are always emitted once per process, even when the log level is `error`.
 

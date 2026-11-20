@@ -12,13 +12,19 @@ import (
 	"time"
 
 	"github.com/devsy-org/devsy-provider-docker-sandbox/internal/compat"
+	"github.com/devsy-org/devsy/logging"
 )
 
 const (
-	commandSecret = "COMMAND=secret-command"
-	testProvider  = "provider"
-	testDetail    = "detail"
-	testWarn      = "warn"
+	testProviderName = "docker-sandbox"
+	commandSecret    = "COMMAND=secret-command"
+	testProvider     = "provider"
+	testDetail       = "detail"
+	testWarn         = "warn"
+	jsonFormat       = "json"
+	infoLevel        = "info"
+	invalidCanary    = "invalid-canary"
+	testComponent    = "component"
 )
 
 func TestDiagnosticLevelsAndWireFormat(t *testing.T) {
@@ -37,7 +43,9 @@ func TestDiagnosticLevelsAndWireFormat(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, level := range []slog.Level{traceLevel, slog.LevelDebug, slog.LevelInfo, slog.LevelWarn, slog.LevelError} {
+			for _, level := range []slog.Level{
+				logging.LevelTrace, slog.LevelDebug, slog.LevelInfo, slog.LevelWarn, slog.LevelError,
+			} {
 				logger.Log(
 					context.Background(),
 					level,
@@ -64,18 +72,23 @@ func TestDiagnosticConfiguration(t *testing.T) {
 		level, format string
 		valid         bool
 	}{
-		{"invalid-canary", jsonFormat, false},
-		{infoLevel, "invalid-canary", false},
+		{invalidCanary, jsonFormat, false},
+		{infoLevel, invalidCanary, false},
 		{infoLevel, "text", true},
 		{infoLevel, "plain", true},
 		{infoLevel, "", true},
+		{"INFO", "PlAiN", true},
+		{infoLevel, "logfmt", true},
+		{infoLevel, "LOGFMT", true},
+		{"info ", "json", false},
+		{infoLevel, "json ", false},
 	} {
 		var out bytes.Buffer
 		logger, err := diagnosticLogger(&out, tc.level, tc.format, nil)
 		if (err == nil) != tc.valid {
 			t.Fatalf("configuration %q %q: %v", tc.level, tc.format, err)
 		}
-		if err != nil && strings.Contains(err.Error(), "invalid-canary") {
+		if err != nil && strings.Contains(err.Error(), invalidCanary) {
 			t.Fatal("invalid value leaked")
 		}
 		if logger != nil {
@@ -83,6 +96,18 @@ func TestDiagnosticConfiguration(t *testing.T) {
 			if !strings.Contains(out.String(), "visible") {
 				t.Fatal("missing output")
 			}
+		}
+	}
+}
+
+func TestDiagnosticConfigurationErrorWording(t *testing.T) {
+	for _, tc := range []struct{ level, format, want string }{
+		{invalidCanary, invalidCanary, "invalid DEVSY_LOG_LEVEL; expected trace, debug, info, warn, or error"},
+		{infoLevel, invalidCanary, "invalid DEVSY_LOG_FORMAT; expected auto, json, text, plain, or logfmt"},
+	} {
+		_, err := diagnosticLogger(io.Discard, tc.level, tc.format, nil)
+		if err == nil || err.Error() != tc.want {
+			t.Fatalf("got error %v, want %q", err, tc.want)
 		}
 	}
 }
@@ -104,8 +129,26 @@ func TestCanonicalEnvironmentFormatsAndLevels(t *testing.T) {
 			assertFields(t, record, map[string]any{"level": testWarn, slog.MessageKey: "visible"})
 		})
 	}
+	for _, format := range []string{"logfmt", "LoGfMt"} {
+		t.Run(format, func(t *testing.T) {
+			var out bytes.Buffer
+			logger, err := diagnosticLogger(&out, "WaRn", format, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			logger.Info("filtered")
+			logger.Warn("visible")
+			if !strings.Contains(out.String(), "msg=visible") ||
+				strings.Contains(out.String(), "filtered") {
+				t.Fatalf("unexpected logfmt output: %q", out.String())
+			}
+		})
+	}
+}
+
+func TestCanonicalEnvironmentRejectsWhitespace(t *testing.T) {
 	for _, tc := range []struct{ level, format string }{
-		{" INFO", "json"}, {"info", " auto"},
+		{" INFO", "json"}, {infoLevel, " auto"}, {infoLevel, "logfmt "},
 	} {
 		_, err := diagnosticLogger(io.Discard, tc.level, tc.format, nil)
 		if err == nil {
@@ -162,9 +205,31 @@ func TestErrorDiagnosticRedaction(t *testing.T) {
 	}
 }
 
+func TestDiagnosticRedactsMessageAndProtectsIdentity(t *testing.T) {
+	var out bytes.Buffer
+	logger, err := diagnosticLogger(&out, infoLevel, "json", []string{"command=secret-command"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	logger.With(testComponent, "impostor").
+		Error("safe secret-command", "provider", "impostor", "detail", "secret-command")
+	var record map[string]any
+	if err := json.Unmarshal(out.Bytes(), &record); err != nil {
+		t.Fatal(err)
+	}
+	assertFields(t, record, map[string]any{
+		testComponent: testProvider, testProvider: testProviderName,
+		slog.MessageKey: "safe [REDACTED]", testDetail: "[REDACTED]",
+	})
+	if strings.Contains(out.String(), "secret-command") ||
+		strings.Contains(out.String(), "impostor") {
+		t.Fatalf("unsafe output: %s", out.String())
+	}
+}
+
 func TestOverlappingSecretsAreFullyRedacted(t *testing.T) {
 	var out bytes.Buffer
-	logger, err := diagnosticLogger(&out, "info", jsonFormat, []string{
+	logger, err := diagnosticLogger(&out, infoLevel, jsonFormat, []string{
 		"API_TOKEN=abc",
 		"DB_PASSWORD=abc-secret-part",
 		"OTHER_SECRET=part-tail",
@@ -203,8 +268,8 @@ func TestMandatoryCompatibilityWarningBypassesErrorThreshold(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertFields(t, record, map[string]any{
-		"level": testWarn, slog.MessageKey: "provider warning", "component": testProvider,
-		testProvider: "docker-sandbox", "operation": "status",
+		"level": testWarn, slog.MessageKey: "provider warning", testComponent: testProvider,
+		testProvider: testProviderName, "operation": "status",
 		testDetail: "compatibility detail [REDACTED]",
 	})
 	if _, err := time.Parse("2006-01-02T15:04:05.000Z0700", record["ts"].(string)); err != nil {
@@ -231,8 +296,8 @@ func assertDiagnosticRecord(t *testing.T, line string) {
 		t.Fatal(err)
 	}
 	assertFields(t, record, map[string]any{
-		slog.MessageKey: "message", "count": float64(7), "component": testProvider,
-		testProvider: "docker-sandbox", testDetail: "safe [REDACTED]",
+		slog.MessageKey: "message", "count": float64(7), testComponent: testProvider,
+		testProvider: testProviderName, testDetail: "safe [REDACTED]",
 	})
 	if strings.Contains(line, "canary-secret") {
 		t.Fatal("secret leaked")

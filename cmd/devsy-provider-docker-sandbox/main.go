@@ -16,6 +16,7 @@ import (
 	"github.com/devsy-org/devsy-provider-docker-sandbox/internal/hostcancel"
 	"github.com/devsy-org/devsy-provider-docker-sandbox/internal/provider"
 	"github.com/devsy-org/devsy-provider-docker-sandbox/internal/sbx"
+	"github.com/devsy-org/devsy/logging"
 )
 
 var version = "development"
@@ -127,7 +128,7 @@ func bypassConfig(verb string, o options) bool {
 func dispatch(i invocation, verb string, h handler) error {
 	o := i.options
 	if verb != "command" {
-		i.logger.Log(i.ctx, traceLevel, "dispatching provider operation")
+		i.logger.Log(i.ctx, logging.LevelTrace, "dispatching provider operation")
 	}
 	if bypassConfig(verb, o) {
 		return h(i)
