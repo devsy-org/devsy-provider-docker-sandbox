@@ -16,6 +16,7 @@ import (
 )
 
 const (
+	testWholeMask    = "[REDACTED]"
 	testProviderName = "docker-sandbox"
 	commandSecret    = "COMMAND=secret-command"
 	testProvider     = "provider"
@@ -167,7 +168,7 @@ func TestWarningAndExitDiagnostics(t *testing.T) {
 	w.Warn("safe secret-command")
 	w.Warn("safe secret-command")
 	if strings.Count(out.String(), "\n") != 1 || strings.Contains(out.String(), "secret-command") ||
-		!strings.Contains(out.String(), "safe [REDACTED]") {
+		!strings.Contains(out.String(), `"detail":"[REDACTED]"`) {
 		t.Fatalf("warning: %s", out.String())
 	}
 }
@@ -200,7 +201,7 @@ func TestErrorDiagnosticRedaction(t *testing.T) {
 		errors.New("safe secret-command"),
 		logger,
 	); got != 1 || strings.Contains(out.String(), "secret-command") ||
-		!strings.Contains(out.String(), "safe [REDACTED]") {
+		!strings.Contains(out.String(), `"detail":"[REDACTED]"`) {
 		t.Fatalf("failure: %d %s", got, out.String())
 	}
 }
@@ -219,7 +220,7 @@ func TestDiagnosticRedactsMessageAndProtectsIdentity(t *testing.T) {
 	}
 	assertFields(t, record, map[string]any{
 		testComponent: testProvider, testProvider: testProviderName,
-		slog.MessageKey: "safe [REDACTED]", testDetail: "[REDACTED]",
+		slog.MessageKey: "safe [REDACTED]", testDetail: testWholeMask,
 	})
 	if strings.Contains(out.String(), "secret-command") ||
 		strings.Contains(out.String(), "impostor") {
@@ -242,7 +243,7 @@ func TestOverlappingSecretsAreFullyRedacted(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &record); err != nil {
 		t.Fatal(err)
 	}
-	assertFields(t, record, map[string]any{testDetail: "safe [REDACTED] visible"})
+	assertFields(t, record, map[string]any{testDetail: testWholeMask})
 }
 
 func TestMandatoryCompatibilityWarningBypassesErrorThreshold(t *testing.T) {
@@ -270,7 +271,7 @@ func TestMandatoryCompatibilityWarningBypassesErrorThreshold(t *testing.T) {
 	assertFields(t, record, map[string]any{
 		"level": testWarn, slog.MessageKey: "provider warning", testComponent: testProvider,
 		testProvider: testProviderName, "operation": "status",
-		testDetail: "compatibility detail [REDACTED]",
+		testDetail: testWholeMask,
 	})
 	if _, err := time.Parse("2006-01-02T15:04:05.000Z0700", record["ts"].(string)); err != nil {
 		t.Fatal(err)
@@ -297,7 +298,7 @@ func assertDiagnosticRecord(t *testing.T, line string) {
 	}
 	assertFields(t, record, map[string]any{
 		slog.MessageKey: "message", "count": float64(7), testComponent: testProvider,
-		testProvider: testProviderName, testDetail: "safe [REDACTED]",
+		testProvider: testProviderName, testDetail: testWholeMask,
 	})
 	if strings.Contains(line, "canary-secret") {
 		t.Fatal("secret leaked")
