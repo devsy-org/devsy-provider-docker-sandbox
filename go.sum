@@ -1,2 +1,4 @@
+github.com/devsy-org/devsy/logging v0.0.0-20261121002232-42213a6fbc3f h1:ZEosyV/3ln3ofOJLSbzwAbS4+m/1vstAabv/I2L+lyk=
+github.com/devsy-org/devsy/logging v0.0.0-20261121002232-42213a6fbc3f/go.mod h1:kpwoMhSdrhnJfTJ014ht04BLw0DS7FyF33RqIIe8CKs=
 golang.org/x/sys v0.46.0 h1:noSf2Fq6F8DBgS+LysIkx7rIExoNHJsxOAtPp4rthXw=
 golang.org/x/sys v0.46.0/go.mod h1:4GL1E5IUh+htKOUEOaiffhrAeqysfVGipDYzABqnCmw=

@@ -21,6 +21,14 @@ Qualification is local by design. GitHub hosted runners cannot run `sbx`, so the
 
 Customer documentation: [Docker Sandboxes provider](https://devsy.sh/docs/managing-providers/docker-sandbox).
 
+## Diagnostics
+
+Provider diagnostics use JSON on standard error by default. Set `DEVSY_LOG_LEVEL` to `trace`, `debug`, `info`, `warn`, or `error`. The default is `info`. Set `DEVSY_LOG_FORMAT` to `auto`, `json`, `text`, `plain`, or `logfmt`. The default and `auto` select JSON. Level and format values are case insensitive and do not accept surrounding whitespace. Command output and guest streams remain unchanged.
+
+Compatibility warnings are always emitted once per process, even when the log level is `error`.
+
+Diagnostics redact values of environment variables whose names identify secrets, tokens, passwords, credentials, or API keys, and the `COMMAND` value. This does not identify every possible secret. Host side redaction remains necessary.
+
 Contributors: [AGENTS.md](AGENTS.md).
 
 ## Releases

@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -15,6 +16,7 @@ import (
 	"github.com/devsy-org/devsy-provider-docker-sandbox/internal/hostcancel"
 	"github.com/devsy-org/devsy-provider-docker-sandbox/internal/provider"
 	"github.com/devsy-org/devsy-provider-docker-sandbox/internal/sbx"
+	"github.com/devsy-org/devsy/logging"
 )
 
 var version = "development"
@@ -28,24 +30,18 @@ const (
 	deleteVerb  = "delete"
 )
 
-func usage() {
-	fmt.Fprintln(
-		os.Stderr,
-		"usage: devsy-provider-docker-sandbox init|create|start|stop|delete|status|describe|"+
-			"command|doctor|recover|version [--machine-key KEY]",
-	)
-}
-
 type options struct {
 	key, attempt, operation     string
 	ackClient, ackBackend, list bool
 }
 
 type invocation struct {
-	ctx     context.Context
-	profile compat.Profile
-	options options
-	p       provider.Provider
+	ctx       context.Context
+	profile   compat.Profile
+	options   options
+	logger    *slog.Logger
+	mandatory *slog.Logger
+	p         provider.Provider
 }
 
 type handler func(invocation) error
@@ -62,6 +58,7 @@ var handlers = map[string]handler{
 func parseOptions(verb string, args []string) (options, error) {
 	var o options
 	flags := flag.NewFlagSet(verb, flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
 	flags.StringVar(&o.key, "machine-key", "", "full SHA-256 machine key")
 	flags.StringVar(&o.attempt, "attempt", "", "exact child attempt ID")
 	flags.StringVar(&o.operation, "operation", "", "exact operation ID")
@@ -80,7 +77,7 @@ func parseOptions(verb string, args []string) (options, error) {
 	flags.BoolVar(&o.list, "list", false, "list local provider journals")
 	_ = flags.Bool("json", false, "render provider-owned JSON")
 	if err := flags.Parse(args); err != nil {
-		return o, err
+		return o, compat.Fail("E_CONFIG_DRIFT", "invalid command options")
 	}
 	if flags.NArg() != 0 {
 		return o, compat.Fail("E_CONFIG_DRIFT", "unexpected positional arguments")
@@ -88,9 +85,8 @@ func parseOptions(verb string, args []string) (options, error) {
 	return o, nil
 }
 
-func execute(ctx context.Context, args []string) error {
+func execute(ctx context.Context, args []string, logger, mandatory *slog.Logger) error {
 	if len(args) == 0 {
-		usage()
 		return compat.Fail("E_CONFIG_DRIFT", "missing subcommand")
 	}
 	verb := args[0]
@@ -100,8 +96,7 @@ func execute(ctx context.Context, args []string) error {
 	}
 	h, ok := handlers[verb]
 	if !ok {
-		usage()
-		return compat.Fail("E_CONFIG_DRIFT", "unknown subcommand %q", verb)
+		return compat.Fail("E_CONFIG_DRIFT", "unknown subcommand")
 	}
 	profile, err := compat.Load()
 	if err != nil {
@@ -111,7 +106,11 @@ func execute(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	return dispatch(invocation{ctx: ctx, profile: profile, options: o}, verb, h)
+	return dispatch(
+		invocation{ctx: ctx, profile: profile, options: o, logger: logger, mandatory: mandatory},
+		verb,
+		h,
+	)
 }
 
 func (o options) clientRecovery() bool {
@@ -128,10 +127,13 @@ func bypassConfig(verb string, o options) bool {
 
 func dispatch(i invocation, verb string, h handler) error {
 	o := i.options
+	if verb != "command" {
+		i.logger.Log(i.ctx, logging.LevelTrace, "dispatching provider operation")
+	}
 	if bypassConfig(verb, o) {
 		return h(i)
 	}
-	warnUnqualifiedHost(os.Stderr, i.profile, verb)
+	warnUnqualifiedHost(warningWriter{logger: i.mandatory}, i.profile, verb)
 	cfg, err := loadConfig(verb, o.key)
 	if err != nil {
 		return err
@@ -258,30 +260,48 @@ func runCommand(i invocation) error {
 }
 
 func run() int {
+	logger, mandatory, configErr := diagnosticLoggers(
+		os.Stderr,
+		os.Getenv("DEVSY_LOG_LEVEL"),
+		os.Getenv("DEVSY_LOG_FORMAT"),
+		os.Environ(),
+	)
+	if configErr != nil {
+		logger, _ = diagnosticLogger(os.Stderr, "info", "json", os.Environ())
+		logFailure(logger, configErr)
+		return 1
+	}
+	if len(os.Args) > 1 {
+		if _, ok := handlers[os.Args[1]]; ok {
+			logger = logger.With("operation", os.Args[1])
+			mandatory = mandatory.With("operation", os.Args[1])
+		}
+	}
+	compat.Stderr = compat.NewWarner(warningWriter{logger: mandatory})
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	ctx, join, err := hostcancel.Watch(ctx, os.Getenv("DEVSY_PROVIDER_CANCEL_FILE"))
 	if err == nil {
-		err = execute(ctx, os.Args[1:])
+		err = execute(ctx, os.Args[1:], logger, mandatory)
 		if joined := join(); joined != nil {
 			err = joined
 		}
 	}
-	return exitCode(err)
+	return exitCode(err, logger)
 }
 
-func exitCode(err error) int {
+func exitCode(err error, logger *slog.Logger) int {
 	if err == nil {
 		return 0
 	}
 	if errors.Is(err, context.Canceled) {
 		if _, ok := errors.AsType[*compat.Error](err); ok {
-			fmt.Fprintln(os.Stderr, err)
+			logFailure(logger, err)
 		}
 		return 130
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
-		fmt.Fprintln(os.Stderr, err)
+		logFailure(logger, err)
 		return 124
 	}
 	if _, ok := errors.AsType[*compat.Error](err); !ok {
@@ -289,7 +309,7 @@ func exitCode(err error) int {
 			return code
 		}
 	}
-	fmt.Fprintln(os.Stderr, err)
+	logFailure(logger, err)
 	return 1
 }
 func main() { os.Exit(run()) }
