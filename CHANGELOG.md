@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/devsy-org/devsy-provider-docker-sandbox/compare/v1.0.2...v1.1.0) (2026-11-21)
+
+
+### Features
+
+* **logging:** adopt shared provider logging ([400a592](https://github.com/devsy-org/devsy-provider-docker-sandbox/commit/400a592deb948531a845510339f52c1a3f269420))
+
 ## [1.0.2](https://github.com/devsy-org/devsy-provider-docker-sandbox/compare/v1.0.1...v1.0.2) (2026-11-12)
 
 
